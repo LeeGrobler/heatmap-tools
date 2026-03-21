@@ -14,7 +14,7 @@
 (function installHeatmapWatcher() {
   // FOUNDATION
 
-  console.log("Heatmap watcher booting...");
+  console.log("Heatmap watcher booting... 0");
 
   let lastUpdateTime = null;
 
@@ -93,7 +93,7 @@
     const rect = chart.getBoundingClientRect();
     const relativeY = y - rect.top;
     const ratio = relativeY / rect.height;
-    const priceIndex = Math.round(ratio * (data.y.length - 1));
+    const priceIndex = Math.round((1 - ratio) * (data.y.length - 1));
 
     return data.y[priceIndex];
   }
