@@ -12,6 +12,8 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
+  // FOUNDATION
+
   console.log("Heatmap watcher booting...");
 
   let lastUpdateTime = null;
@@ -61,20 +63,91 @@
     lastUpdateTime = data.updateTime;
     window.__liqHeatmapData = data;
 
-    window.__liqClusters =
-      data.liq.map(([t, p, v]) => ({
-        timeIndex: t,
-        priceIndex: p,
-        price: data.y[p],
-        liquidity: v
-      }));
+    window.__liqClusters = data.liq.map(([t, p, v]) => ({
+      timeIndex: t,
+      priceIndex: p,
+      price: data.y[p],
+      liquidity: v
+    }));
 
-    console.log(
-      "Heatmap dataset updated:",
-      __liqClusters.length,
-      "clusters"
-    );
+    renderOverlay(computeNearestClusters(data, window.__liqClusters));
+    console.log("Heatmap dataset updated:", __liqClusters.length, "clusters");
   }
 
   setInterval(updateDataset, 1500);
+
+  // ANALYTICS LAYER
+
+  function getCurrentPrice(data) {
+    const lastCandle = data.prices[data.prices.length - 1];
+    return Number(lastCandle[4]);
+  }
+
+  function computeNearestClusters(data, clusters) {
+    const price = getCurrentPrice(data);
+    const above = clusters.filter(c => c.price > price);
+    const below = clusters.filter(c => c.price < price);
+
+    above.sort((a, b) => a.price - b.price);
+    below.sort((a, b) => b.price - a.price);
+
+    return {
+      currentPrice: price,
+      nearestAbove: above[0],
+      nearestBelow: below[0],
+      totalAbove: above.reduce((s, c) => s + c.liquidity, 0),
+      totalBelow: below.reduce((s, c) => s + c.liquidity, 0)
+    };
+  }
+
+  // UI LAYER
+
+  function ensureOverlayPanel() {
+    let panel = document.getElementById("liq-tools-panel");
+
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "liq-tools-panel";
+
+      Object.assign(panel.style, {
+        position: "fixed",
+        top: "110px",
+        right: "10px",
+        zIndex: 999999,
+        background: "#111",
+        color: "#fff",
+        padding: "14px",
+        borderRadius: "10px",
+        fontFamily: "monospace",
+        fontSize: "13px",
+        boxShadow: "0 0 12px rgba(0,0,0,.6)"
+      });
+
+      document.body.appendChild(panel);
+    }
+
+    return panel;
+  }
+
+  function renderOverlay(stats) {
+    const panel = ensureOverlayPanel();
+    const bias = stats.totalAbove > stats.totalBelow ? "UPWARD" : "DOWNWARD";
+    panel.innerHTML = `
+      <b>Liquidation Tools</b><br><br>
+
+      Price:
+      ${stats.currentPrice.toFixed(2)}<br><br>
+
+      Nearest Above:<br>
+      ${stats.nearestAbove?.price.toFixed(2)}<br>
+      $${Math.round(stats.nearestAbove?.liquidity).toLocaleString()}<br><br>
+
+      Nearest Below:<br>
+      ${stats.nearestBelow?.price.toFixed(2)}<br>
+      $${Math.round(stats.nearestBelow?.liquidity).toLocaleString()}<br><br>
+
+      Bias:<br>
+      ${bias}
+    `;
+  }
 })();
