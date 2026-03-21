@@ -83,6 +83,21 @@
     return Number(lastCandle[4]);
   }
 
+  function screenYToPrice(y) {
+    const data = window.__liqHeatmapData;
+    if (!data) return null;
+
+    const chart = document.querySelector("[data-zr-dom-id]");
+    if (!chart) return null;
+
+    const rect = chart.getBoundingClientRect();
+    const relativeY = y - rect.top;
+    const ratio = relativeY / rect.height;
+    const priceIndex = Math.round(ratio * (data.y.length - 1));
+
+    return data.y[priceIndex];
+  }
+
   function computeNearestClusters(data, clusters) {
     const price = getCurrentPrice(data);
     const latestTimeIndex = data.prices.length - 1;
@@ -102,7 +117,26 @@
     };
   }
 
+  function computeRegionStats(minPrice, maxPrice) {
+    const clusters = window.__liqClusters;
+    if (!clusters) return null;
+
+    const selected = clusters.filter(c => c.price >= minPrice && c.price <= maxPrice);
+    const totalLiquidity = selected.reduce((sum, c) => sum + c.liquidity, 0);
+
+    return {
+      clusterCount: selected.length,
+      totalLiquidity
+    };
+  }
+
   // UI LAYER
+
+  let selection = {
+    active: false,
+    startY: null,
+    endY: null
+  };
 
   function ensureOverlayPanel() {
     let panel = document.getElementById("liq-tools-panel");
@@ -136,20 +170,90 @@
     const bias = stats.totalAbove > stats.totalBelow ? "UPWARD" : "DOWNWARD";
     panel.innerHTML = `
       <b>Liquidation Tools</b><br><br>
-
-      Price:
-      ${stats.currentPrice.toFixed(2)}<br><br>
-
+      Price: ${stats.currentPrice.toFixed(2)}<br><br>
       Nearest Above:<br>
       ${stats.nearestAbove?.price.toFixed(2)}<br>
       $${Math.round(stats.nearestAbove?.liquidity).toLocaleString()}<br><br>
-
       Nearest Below:<br>
       ${stats.nearestBelow?.price.toFixed(2)}<br>
       $${Math.round(stats.nearestBelow?.liquidity).toLocaleString()}<br><br>
-
-      Bias:<br>
-      ${bias}
+      Bias: ${bias}
     `;
   }
+
+  function renderRegionOverlay(minPrice, maxPrice, stats) {
+    let box = document.getElementById("liq-region-panel");
+
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "liq-region-panel";
+
+      Object.assign(box.style, {
+        position: "fixed",
+        left: "20px",
+        top: "120px",
+        zIndex: 999999,
+        background: "#111",
+        color: "#fff",
+        padding: "14px",
+        borderRadius: "10px",
+        fontFamily: "monospace"
+      });
+
+      document.body.appendChild(box);
+    }
+
+    const currentPrice = getCurrentPrice(window.__liqHeatmapData);
+
+    box.innerHTML = `
+      <b>Selected Region</b><br><br>
+      Top: ${maxPrice.toFixed(2)}<br>
+      Bottom: ${minPrice.toFixed(2)}<br><br>
+      Clusters: ${stats.clusterCount}<br>
+      Liquidity: $${Math.round(stats.totalLiquidity).toLocaleString()}<br><br>
+      Distance from price: ${(((maxPrice + minPrice) / 2) - currentPrice).toFixed(2)}
+    `;
+
+  }
+
+  function installDragSelection() {
+    const container = document.querySelector("[data-zr-dom-id]")?.parentElement;
+
+    if (!container) {
+      console.log("Heatmap container not found");
+      return;
+    }
+
+    console.log("Using heatmap container:", container);
+
+    container.addEventListener("mousedown", e => {
+      selection.active = true;
+      selection.startY = e.clientY;
+      console.log("Drag start:", selection.startY);
+    });
+
+    window.addEventListener("mouseup", e => {
+      if (!selection.active) return;
+
+      selection.active = false;
+      selection.endY = e.clientY;
+
+      console.log("Drag end:", selection.endY);
+      handleSelection();
+    });
+  }
+
+  function handleSelection() {
+    const priceA = screenYToPrice(selection.startY);
+    const priceB = screenYToPrice(selection.endY);
+    if (!priceA || !priceB) return;
+
+    const minPrice = Math.min(priceA, priceB);
+    const maxPrice = Math.max(priceA, priceB);
+    const stats = computeRegionStats(minPrice, maxPrice);
+
+    renderRegionOverlay(minPrice, maxPrice, stats);
+  }
+
+  setTimeout(installDragSelection, 3000);
 })();
