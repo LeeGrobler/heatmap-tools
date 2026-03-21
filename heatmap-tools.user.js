@@ -85,8 +85,10 @@
 
   function computeNearestClusters(data, clusters) {
     const price = getCurrentPrice(data);
-    const above = clusters.filter(c => c.price > price);
-    const below = clusters.filter(c => c.price < price);
+    const latestTimeIndex = data.prices.length - 1;
+    const latestClusters = clusters.filter(c => c.timeIndex === latestTimeIndex);
+    const above = latestClusters.filter(c => c.price > price);
+    const below = latestClusters.filter(c => c.price < price);
 
     above.sort((a, b) => a.price - b.price);
     below.sort((a, b) => b.price - a.price);
