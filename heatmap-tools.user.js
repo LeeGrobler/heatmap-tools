@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (16)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (18)");
 
   /* -------------------------------------------------
     FOUNDATION 1 — DATA EXTRACTION (unchanged)
@@ -211,6 +211,16 @@
     return Number.isFinite(normalized) ? normalized : null;
   }
 
+  function formatCurrency(value) {
+    const numericValue = Number(value) || 0;
+    return numericValue.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
   function getRenderedLadder() {
     const geometry = buildRowGeometry();
     return geometry?.ladder || [];
@@ -336,6 +346,52 @@
     };
   }
 
+  function findNearestPriceRowIndex(ladder, targetPrice) {
+    let bestIndex = -1;
+    let bestDiff = Infinity;
+
+    ladder.forEach((price, rowIndex) => {
+      const numericPrice = normalizePriceValue(price);
+      if (numericPrice === null) return;
+
+      const diff = Math.abs(numericPrice - targetPrice);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIndex = rowIndex;
+      }
+    });
+
+    return bestIndex;
+  }
+
+  function buildSelectionDistance(currentPrice, currentPriceRowIndex, topIndex, bottomIndex, ladder) {
+    const topPrice = normalizePriceValue(ladder[topIndex]);
+    const bottomPrice = normalizePriceValue(ladder[bottomIndex]);
+    if (topPrice === null || bottomPrice === null || currentPriceRowIndex < 0) return null;
+
+    if (currentPrice < bottomPrice) {
+      return {
+        anchor: "bottom",
+        rows: Math.abs(bottomIndex - currentPriceRowIndex),
+        priceDistance: Math.abs(bottomPrice - currentPrice)
+      };
+    }
+
+    if (currentPrice > topPrice) {
+      return {
+        anchor: "top",
+        rows: Math.abs(topIndex - currentPriceRowIndex),
+        priceDistance: Math.abs(currentPrice - topPrice)
+      };
+    }
+
+    return {
+      anchor: "inside",
+      rows: 0,
+      priceDistance: 0
+    };
+  }
+
   function computeRegionStats(minIndex, maxIndex) {
     const data = window.__liqHeatmapData;
     if (!data) return null;
@@ -343,6 +399,8 @@
     const latest = data.prices.length - 1;
     const allLatestClusters = (Array.isArray(window.__liqClusters) ? window.__liqClusters : []).filter(c => c.timeIndex === latest);
     const ladder = getRenderedLadder();
+    const currentPrice = getCurrentPrice(data);
+    const currentPriceRowIndex = findNearestPriceRowIndex(ladder, currentPrice);
     const selected = allLatestClusters.filter(c => c.priceIndex >= minIndex && c.priceIndex <= maxIndex);
     const selectedLiquidity = selected.reduce((sum, cluster) => sum + (Number(cluster.liquidity) || 0), 0);
     const selectedRowCount = maxIndex - minIndex + 1;
@@ -370,6 +428,8 @@
       selectedRowCount,
       matchedByLatestPriceIndex: selected.length,
       totalSelectedLiquidity: selectedLiquidity,
+      currentPrice,
+      currentPriceRowIndex,
       priceIndexRangeAtLatest: allLatestClusters.length > 0 ? {
         min: Math.min(...allLatestClusters.map(c => c.priceIndex)),
         max: Math.max(...allLatestClusters.map(c => c.priceIndex))
@@ -386,7 +446,9 @@
     return {
       clusterCount: selectedRowCount,
       activeClusterCount: selected.length,
-      totalLiquidity: selectedLiquidity
+      totalLiquidity: selectedLiquidity,
+      currentPrice,
+      currentPriceRowIndex
     };
   }
 
@@ -422,7 +484,8 @@
         border: "1px solid #fff",
         borderRadius: "10px",
         fontFamily: "monospace",
-        fontSize: "13px"
+        fontSize: "13px",
+        lineHeight: "1.45"
       });
 
       document.body.appendChild(panel);
@@ -437,13 +500,13 @@
 
     panel.innerHTML = `
       <b>Liquidation Tools</b><br><br>
-      Price: ${stats.currentPrice.toFixed(2)}<br><br>
+      Price: ${formatCurrency(stats.currentPrice)}<br><br>
       Nearest Above:<br>
-      ${stats.nearestAbove?.price.toFixed(2)}<br>
-      $${Math.round(stats.nearestAbove?.liquidity).toLocaleString()}<br><br>
+      ${formatCurrency(stats.nearestAbove?.price)}<br>
+      ${formatCurrency(stats.nearestAbove?.liquidity)}<br><br>
       Nearest Below:<br>
-      ${stats.nearestBelow?.price.toFixed(2)}<br>
-      $${Math.round(stats.nearestBelow?.liquidity).toLocaleString()}<br><br>
+      ${formatCurrency(stats.nearestBelow?.price)}<br>
+      ${formatCurrency(stats.nearestBelow?.liquidity)}<br><br>
       Bias: ${bias}
     `;
   }
@@ -467,22 +530,32 @@
         padding: "14px",
         border: "1px solid #fff",
         borderRadius: "10px",
-        fontFamily: "monospace"
+        fontFamily: "monospace",
+        fontSize: "13px",
+        lineHeight: "1.45"
       });
 
       document.body.appendChild(box);
     }
+
+    const distanceLine = stats.distance?.anchor === "inside"
+      ? `Distance: 0 rows (${formatCurrency(0)}) [inside]`
+      : stats.distance
+        ? `Distance: ${stats.distance.rows} rows (${formatCurrency(stats.distance.priceDistance)})`
+        : `Distance: n/a`;
 
     box.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
         <b>Selected Region</b>
         <button id="liq-region-close" style="background:#1b1b1b;color:#fff;border:1px solid #fff;border-radius:6px;padding:0px 8px 2px;font:inherit;cursor:pointer;">x</button>
       </div><br>
-      Top: ${max.toFixed(2)}<br>
-      Bottom: ${min.toFixed(2)}<br><br>
+      Price: ${formatCurrency(stats.currentPrice)}<br><br>
+      Top: ${formatCurrency(max)}<br>
+      Bottom: ${formatCurrency(min)}<br><br>
+      ${distanceLine}<br><br>
       Rows: ${stats.clusterCount}<br>
       Clusters: ${stats.activeClusterCount}<br>
-      Liquidity: $${Math.round(stats.totalLiquidity).toLocaleString()}
+      Liquidity: ${formatCurrency(stats.totalLiquidity)}
     `;
 
     const closeButton = document.getElementById("liq-region-close");
@@ -604,6 +677,14 @@
       return;
     }
 
+    stats.distance = buildSelectionDistance(
+      stats.currentPrice,
+      stats.currentPriceRowIndex,
+      range.topIndex,
+      range.bottomIndex,
+      geometry.ladder
+    );
+
     console.log("[Selection] Computed stats:", JSON.stringify({
       minIndex: range.minIndex,
       maxIndex: range.maxIndex,
@@ -611,6 +692,9 @@
       bottomIndex: range.bottomIndex,
       topPrice: topPrice.toFixed(2),
       bottomPrice: bottomPrice.toFixed(2),
+      currentPrice: stats.currentPrice.toFixed(2),
+      currentPriceRowIndex: stats.currentPriceRowIndex,
+      distance: stats.distance,
       clusters: stats.clusterCount,
       liquidity: stats.totalLiquidity
     }));
