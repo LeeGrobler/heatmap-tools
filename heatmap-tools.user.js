@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... (32)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (36)");
 
   const SELECTION_STYLES = [
     {
@@ -245,6 +245,13 @@
 
   function formatPriceWithDistance(value, currentPrice) {
     return `${formatCurrency(value)} (${formatPercentDistance(value, currentPrice)}%)`;
+  }
+
+  function formatRatio(value) {
+    if (value === Infinity) return "Infinity";
+    if (value === -Infinity) return "-Infinity";
+    if (!Number.isFinite(value)) return "n/a";
+    return value.toFixed(2);
   }
 
   function getRenderedLadder() {
@@ -492,14 +499,18 @@
     above.sort((a, b) => a.price - b.price);
     below.sort((a, b) => b.price - a.price);
 
+    const totalAbove = above.reduce((s, c) => s + c.liquidity, 0);
+    const totalBelow = below.reduce((s, c) => s + c.liquidity, 0);
+
     return {
       currentPrice: price,
       currentPriceRowIndex,
       nearestAbove: above[0],
       nearestBelow: below[0],
-      totalAbove: above.reduce((s, c) => s + c.liquidity, 0),
-      totalBelow: below.reduce((s, c) => s + c.liquidity, 0),
-      biasRowsChecked
+      totalAbove,
+      totalBelow,
+      biasRowsChecked,
+      dominanceRatio: totalBelow === 0 ? (totalAbove > 0 ? Infinity : 0) : totalAbove / totalBelow
     };
   }
 
@@ -576,12 +587,34 @@
       });
     }
 
+    const largestCluster = selected.reduce((largest, cluster) => {
+      if (!largest || (Number(cluster.liquidity) || 0) > (Number(largest.liquidity) || 0)) return cluster;
+      return largest;
+    }, null);
+
+    const avgClusterSize = selected.length > 0 ? selectedLiquidity / selected.length : 0;
+    const densityScore = selectedRowCount > 0 ? selectedLiquidity / selectedRowCount : 0;
+    const continuityScore = selectedRowCount > 0 ? selected.length / selectedRowCount : 0;
+    const peakConcentrationRatio = selectedLiquidity > 0 && largestCluster
+      ? (Number(largestCluster.liquidity) || 0) / selectedLiquidity
+      : 0;
+    const largestClusterDistance = largestCluster ? {
+      rows: Math.abs(largestCluster.priceIndex - currentPriceRowIndex),
+      percent: Number(formatPercentDistance(largestCluster.price, currentPrice))
+    } : null;
+
     return {
       clusterCount: selectedRowCount,
       activeClusterCount: selected.length,
       totalLiquidity: selectedLiquidity,
       currentPrice,
-      currentPriceRowIndex
+      currentPriceRowIndex,
+      avgClusterSize,
+      largestCluster,
+      largestClusterDistance,
+      densityScore,
+      continuityScore,
+      peakConcentrationRatio
     };
   }
 
@@ -639,9 +672,9 @@
 
     Object.assign(box.style, {
       position: "fixed",
-      left: `${10 + (index * 270)}px`,
+      left: `${10 + (index * 290)}px`,
       top: "110px",
-      width: "250px",
+      width: "270px",
       zIndex: 999999,
       background: "#111",
       color: "#fff",
@@ -662,7 +695,7 @@
     drawCurrentPriceHighlight(stats.currentPrice);
 
     panel.innerHTML = `
-      <b>Liquidation Tools</b><br><br>
+      <b>Heatmap Overview</b><br><br>
       Price: ${formatPriceWithDistance(stats.currentPrice, stats.currentPrice)}<br><br>
       Nearest Above:<br>
       ${formatPriceWithDistance(stats.nearestAbove?.price, stats.currentPrice)}<br>
@@ -670,7 +703,10 @@
       Nearest Below:<br>
       ${formatPriceWithDistance(stats.nearestBelow?.price, stats.currentPrice)}<br>
       ${formatCurrency(stats.nearestBelow?.liquidity)}<br><br>
+      Total Above:<br>${formatCurrency(stats.totalAbove)}<br><br>
+      Total Below:<br>${formatCurrency(stats.totalBelow)}<br><br>
       Bias: ${bias}<br>
+      Dominance Ratio: ${formatRatio(stats.dominanceRatio)}<br>
       (${stats.biasRowsChecked} rows checked)
     `;
   }
@@ -685,6 +721,9 @@
       : stats.distance
         ? `Distance: ${stats.distance.rows} rows<br>${formatCurrency(stats.distance.priceDistance)} - ${formatPercentDistance(stats.distance.edgePrice, stats.currentPrice)}%`
         : `Distance: n/a`;
+    const largestClusterLine = stats.largestCluster
+      ? `${formatCurrency(stats.largestCluster.liquidity)}<br>${stats.largestClusterDistance?.rows ?? 0} rows away - ${(stats.largestClusterDistance?.percent ?? 0).toFixed(2)}%`
+      : `n/a`;
 
     box.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
@@ -697,7 +736,12 @@
       ${distanceLine}<br><br>
       Rows: ${stats.clusterCount}<br>
       Clusters: ${stats.activeClusterCount}<br>
-      Liquidity: ${formatCurrency(stats.totalLiquidity)}
+      Liquidity: ${formatCurrency(stats.totalLiquidity)}<br><br>
+      Avg Cluster Size: ${formatCurrency(stats.avgClusterSize)}<br>
+      Largest Cluster: ${largestClusterLine}<br><br>
+      Density Score: ${formatCurrency(stats.densityScore)}<br>
+      Continuity Score: ${(stats.continuityScore * 100).toFixed(2)}%<br>
+      Peak Concentration Ratio: ${formatRatio(stats.peakConcentrationRatio)}
     `;
 
     const closeButton = document.getElementById(`liq-region-close-${index}`);
