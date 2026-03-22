@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (18)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (19)");
 
   /* -------------------------------------------------
     FOUNDATION 1 — DATA EXTRACTION (unchanged)
@@ -221,6 +221,20 @@
     });
   }
 
+  function formatPercentDistance(value, referencePrice) {
+    const numericValue = Number(value);
+    const numericReference = Number(referencePrice);
+    if (!Number.isFinite(numericValue) || !Number.isFinite(numericReference) || numericReference === 0) {
+      return "0.00";
+    }
+
+    return (Math.abs(numericValue - numericReference) / Math.abs(numericReference) * 100).toFixed(2);
+  }
+
+  function formatPriceWithDistance(value, currentPrice) {
+    return `${formatCurrency(value)} (${formatPercentDistance(value, currentPrice)}%)`;
+  }
+
   function getRenderedLadder() {
     const geometry = buildRowGeometry();
     return geometry?.ladder || [];
@@ -373,7 +387,8 @@
       return {
         anchor: "bottom",
         rows: Math.abs(bottomIndex - currentPriceRowIndex),
-        priceDistance: Math.abs(bottomPrice - currentPrice)
+        priceDistance: Math.abs(bottomPrice - currentPrice),
+        edgePrice: bottomPrice
       };
     }
 
@@ -381,14 +396,16 @@
       return {
         anchor: "top",
         rows: Math.abs(topIndex - currentPriceRowIndex),
-        priceDistance: Math.abs(currentPrice - topPrice)
+        priceDistance: Math.abs(currentPrice - topPrice),
+        edgePrice: topPrice
       };
     }
 
     return {
       anchor: "inside",
       rows: 0,
-      priceDistance: 0
+      priceDistance: 0,
+      edgePrice: currentPrice
     };
   }
 
@@ -500,12 +517,12 @@
 
     panel.innerHTML = `
       <b>Liquidation Tools</b><br><br>
-      Price: ${formatCurrency(stats.currentPrice)}<br><br>
+      Price: ${formatPriceWithDistance(stats.currentPrice, stats.currentPrice)}<br><br>
       Nearest Above:<br>
-      ${formatCurrency(stats.nearestAbove?.price)}<br>
+      ${formatPriceWithDistance(stats.nearestAbove?.price, stats.currentPrice)}<br>
       ${formatCurrency(stats.nearestAbove?.liquidity)}<br><br>
       Nearest Below:<br>
-      ${formatCurrency(stats.nearestBelow?.price)}<br>
+      ${formatPriceWithDistance(stats.nearestBelow?.price, stats.currentPrice)}<br>
       ${formatCurrency(stats.nearestBelow?.liquidity)}<br><br>
       Bias: ${bias}
     `;
@@ -539,9 +556,9 @@
     }
 
     const distanceLine = stats.distance?.anchor === "inside"
-      ? `Distance: 0 rows (${formatCurrency(0)}) [inside]`
+      ? `Distance: 0 rows (${formatCurrency(0)} - 0.00%) [inside]`
       : stats.distance
-        ? `Distance: ${stats.distance.rows} rows (${formatCurrency(stats.distance.priceDistance)})`
+        ? `Distance: ${stats.distance.rows} rows (${formatCurrency(stats.distance.priceDistance)} - ${formatPercentDistance(stats.distance.edgePrice, stats.currentPrice)}%)`
         : `Distance: n/a`;
 
     box.innerHTML = `
@@ -549,9 +566,9 @@
         <b>Selected Region</b>
         <button id="liq-region-close" style="background:#1b1b1b;color:#fff;border:1px solid #fff;border-radius:6px;padding:0px 8px 2px;font:inherit;cursor:pointer;">x</button>
       </div><br>
-      Price: ${formatCurrency(stats.currentPrice)}<br><br>
-      Top: ${formatCurrency(max)}<br>
-      Bottom: ${formatCurrency(min)}<br><br>
+      Price: ${formatPriceWithDistance(stats.currentPrice, stats.currentPrice)}<br><br>
+      Top: ${formatPriceWithDistance(max, stats.currentPrice)}<br>
+      Bottom: ${formatPriceWithDistance(min, stats.currentPrice)}<br><br>
       ${distanceLine}<br><br>
       Rows: ${stats.clusterCount}<br>
       Clusters: ${stats.activeClusterCount}<br>
