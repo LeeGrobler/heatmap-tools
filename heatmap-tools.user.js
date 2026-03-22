@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (32)");
+  console.log("Heatmap watcher booting... (32)");
 
   const SELECTION_STYLES = [
     {
