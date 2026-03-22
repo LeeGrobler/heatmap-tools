@@ -10,7 +10,24 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (28)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (32)");
+
+  const SELECTION_STYLES = [
+    {
+      border: "#ff6b6b",
+      background: "linear-gradient(180deg, rgba(255,107,107,0.30), rgba(255,107,107,0.14))",
+      inset: "0 0 0 1px rgba(255,107,107,0.26) inset",
+      panelBorder: "#ff6b6b"
+    },
+    {
+      border: "#f2e8c9",
+      background: "linear-gradient(180deg, rgba(242,232,201,0.28), rgba(242,232,201,0.12))",
+      inset: "0 0 0 1px rgba(242,232,201,0.26) inset",
+      panelBorder: "#f2e8c9"
+    }
+  ];
+
+  let savedSelections = [];
 
   /* -------------------------------------------------
     FOUNDATION 1 — DATA EXTRACTION (unchanged)
@@ -235,24 +252,29 @@
     return geometry?.ladder || [];
   }
 
-  function ensureSelectionOverlay() {
-    let overlay = document.getElementById("liq-selection-overlay");
+  function ensureSelectionOverlay(index) {
+    let overlay = document.getElementById(`liq-selection-overlay-${index}`);
+    const style = SELECTION_STYLES[index] || SELECTION_STYLES[0];
 
     if (!overlay) {
       overlay = document.createElement("div");
-      overlay.id = "liq-selection-overlay";
+      overlay.id = `liq-selection-overlay-${index}`;
 
       Object.assign(overlay.style, {
         position: "absolute",
         pointerEvents: "none",
         display: "none",
         boxSizing: "border-box",
-        borderTop: "2px solid #ff6b6b",
-        borderBottom: "2px solid #ff6b6b",
-        background: "linear-gradient(180deg, rgba(255,107,107,0.30), rgba(255,107,107,0.14))",
-        boxShadow: "0 0 0 1px rgba(255,107,107,0.26) inset"
+        zIndex: "3"
       });
     }
+
+    Object.assign(overlay.style, {
+      borderTop: `2px solid ${style.border}`,
+      borderBottom: `2px solid ${style.border}`,
+      background: style.background,
+      boxShadow: style.inset
+    });
 
     const container = getHeatmapInstance()?.getDom();
     if (!container) return null;
@@ -269,11 +291,11 @@
     return overlay;
   }
 
-  function clearSelectionHighlight() {
-    const overlay = document.getElementById("liq-selection-overlay");
-    if (!overlay) return;
-
-    overlay.style.display = "none";
+  function clearSelectionHighlights() {
+    SELECTION_STYLES.forEach((_, index) => {
+      const overlay = document.getElementById(`liq-selection-overlay-${index}`);
+      if (overlay) overlay.style.display = "none";
+    });
   }
 
   function ensureCurrentPriceOverlay() {
@@ -288,7 +310,8 @@
         pointerEvents: "none",
         display: "none",
         background: "rgba(0,0,0,0.35)",
-        boxShadow: "0 0 0 1px rgba(0,0,0,0.18) inset"
+        boxShadow: "0 0 0 1px rgba(0,0,0,0.18) inset",
+        zIndex: "2"
       });
     }
 
@@ -385,14 +408,14 @@
     });
   }
 
-  function drawSelectionHighlight(geometry, range) {
-    const overlay = ensureSelectionOverlay();
+  function drawSelectionHighlight(geometry, range, index) {
+    const overlay = ensureSelectionOverlay(index);
     if (!overlay) return;
 
     const topRow = geometry.rows.find(row => row.rowIndex === range.topIndex);
     const bottomRow = geometry.rows.find(row => row.rowIndex === range.bottomIndex);
     if (!topRow || !bottomRow) {
-      clearSelectionHighlight();
+      overlay.style.display = "none";
       return;
     }
 
@@ -410,10 +433,16 @@
     });
   }
 
-  function closeRegionOverlay() {
-    const box = document.getElementById("liq-region-panel");
-    if (box) box.remove();
-    clearSelectionHighlight();
+  function clearRegionPanels() {
+    [0, 1].forEach(index => {
+      const box = document.getElementById(`liq-region-panel-${index}`);
+      if (box) box.remove();
+    });
+  }
+
+  function closeRegionOverlay(index) {
+    savedSelections.splice(index, 1);
+    renderSavedSelections();
   }
 
   function getInclusiveRowRange(geometry, a, b) {
@@ -598,6 +627,35 @@
     return panel;
   }
 
+  function ensureRegionPanel(index) {
+    let box = document.getElementById(`liq-region-panel-${index}`);
+    const style = SELECTION_STYLES[index] || SELECTION_STYLES[0];
+
+    if (!box) {
+      box = document.createElement("div");
+      box.id = `liq-region-panel-${index}`;
+      document.body.appendChild(box);
+    }
+
+    Object.assign(box.style, {
+      position: "fixed",
+      left: `${10 + (index * 270)}px`,
+      top: "110px",
+      width: "250px",
+      zIndex: 999999,
+      background: "#111",
+      color: "#fff",
+      padding: "14px",
+      border: `1px solid ${style.panelBorder}`,
+      borderRadius: "10px",
+      fontFamily: "monospace",
+      fontSize: "13px",
+      lineHeight: "1.45"
+    });
+
+    return box;
+  }
+
   function renderOverlay(stats) {
     const panel = ensureOverlayPanel();
     const bias = stats.totalAbove > stats.totalBelow ? "UPWARD" : "DOWNWARD";
@@ -619,31 +677,9 @@
 
   /* ---------- region panel ---------- */
 
-  function renderRegionOverlay(min, max, stats) {
-    let box = document.getElementById("liq-region-panel");
-
-    if (!box) {
-      box = document.createElement("div");
-      box.id = "liq-region-panel";
-
-      Object.assign(box.style, {
-        position: "fixed",
-        left: "10px",
-        top: "110px",
-        zIndex: 999999,
-        background: "#111",
-        color: "#fff",
-        padding: "14px",
-        border: "1px solid #fff",
-        borderRadius: "10px",
-        fontFamily: "monospace",
-        fontSize: "13px",
-        lineHeight: "1.45"
-      });
-
-      document.body.appendChild(box);
-    }
-
+  function renderRegionOverlay(index, selectionData) {
+    const box = ensureRegionPanel(index);
+    const { bottomPrice: min, topPrice: max, stats } = selectionData;
     const distanceLine = stats.distance?.anchor === "inside"
       ? `Distance: 0 rows [inside]<br>${formatCurrency(0)} - 0.00%`
       : stats.distance
@@ -652,8 +688,8 @@
 
     box.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <b>Selected Region</b>
-        <button id="liq-region-close" style="background:#1b1b1b;color:#fff;border:1px solid #fff;border-radius:6px;padding:0px 8px 2px;font:inherit;cursor:pointer;">x</button>
+        <b>Selected Region ${index + 1}</b>
+        <button id="liq-region-close-${index}" style="background:#1b1b1b;color:#fff;border:1px solid #fff;border-radius:6px;padding:0px 8px 2px;font:inherit;cursor:pointer;">x</button>
       </div><br>
       Price: ${formatPriceWithDistance(stats.currentPrice, stats.currentPrice)}<br><br>
       Top: ${formatPriceWithDistance(max, stats.currentPrice)}<br>
@@ -664,10 +700,23 @@
       Liquidity: ${formatCurrency(stats.totalLiquidity)}
     `;
 
-    const closeButton = document.getElementById("liq-region-close");
+    const closeButton = document.getElementById(`liq-region-close-${index}`);
     if (closeButton) {
-      closeButton.onclick = closeRegionOverlay;
+      closeButton.onclick = () => closeRegionOverlay(index);
     }
+  }
+
+  function renderSavedSelections() {
+    clearSelectionHighlights();
+    clearRegionPanels();
+
+    const geometry = buildRowGeometry();
+    savedSelections.forEach((selectionData, index) => {
+      if (geometry) {
+        drawSelectionHighlight(geometry, selectionData.range, index);
+      }
+      renderRegionOverlay(index, selectionData);
+    });
   }
 
   /* -------------------------------------------------
@@ -709,7 +758,6 @@
 
     container.addEventListener("pointerdown", e => {
       if (e.button !== 0) return;
-      clearSelectionHighlight();
       hideSelectionCounter();
       selection.active = true;
       selection.pointerId = e.pointerId;
@@ -792,8 +840,22 @@
       geometry.ladder
     );
 
-    drawSelectionHighlight(geometry, range);
-    renderRegionOverlay(bottomPrice, topPrice, stats);
+    const nextSelection = {
+      range,
+      topPrice,
+      bottomPrice,
+      stats
+    };
+
+    if (savedSelections.length === 0) {
+      savedSelections = [nextSelection];
+    } else if (savedSelections.length === 1) {
+      savedSelections = [savedSelections[0], nextSelection];
+    } else {
+      savedSelections = [savedSelections[0], nextSelection];
+    }
+
+    renderSavedSelections();
   }
 
   setTimeout(installDragSelection, 3000);
