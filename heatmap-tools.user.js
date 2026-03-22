@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (13)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (14)");
 
   /* -------------------------------------------------
     FOUNDATION 1 — DATA EXTRACTION (unchanged)
@@ -329,6 +329,7 @@
         background: "#111",
         color: "#fff",
         padding: "14px",
+        border: "1px solid #fff",
         borderRadius: "10px",
         fontFamily: "monospace",
         fontSize: "13px"
@@ -368,12 +369,13 @@
 
       Object.assign(box.style, {
         position: "fixed",
-        left: "20px",
-        top: "120px",
+        left: "10px",
+        top: "110px",
         zIndex: 999999,
         background: "#111",
         color: "#fff",
         padding: "14px",
+        border: "1px solid #fff",
         borderRadius: "10px",
         fontFamily: "monospace"
       });
