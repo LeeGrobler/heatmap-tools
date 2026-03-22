@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (14)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (16)");
 
   /* -------------------------------------------------
     FOUNDATION 1 — DATA EXTRACTION (unchanged)
@@ -116,9 +116,11 @@
     const categoryAxisIndex = option.yAxis.findIndex(a => a.type === "category");
     const categoryAxis = option.yAxis[categoryAxisIndex];
     if (!categoryAxis) return null;
+    const xAxes = Array.isArray(option.xAxis) ? option.xAxis : [option.xAxis].filter(Boolean);
+    const primaryXAxisIndex = xAxes.findIndex(Boolean);
 
     const ladder = categoryAxis.data;
-    const buildLog = { ladderLength: ladder.length, instExists: !!inst, categoryAxisIndex };
+    const buildLog = { ladderLength: ladder.length, instExists: !!inst, categoryAxisIndex, primaryXAxisIndex };
     console.log("[Resolver] Built with state:", JSON.stringify(buildLog));
 
     const rect = inst.getDom().getBoundingClientRect();
@@ -146,7 +148,23 @@
 
     if (!rows.length) return null;
 
-    return { rect, ladder, rows };
+    let plotLeft = 0;
+    let plotRight = rect.width;
+    if (primaryXAxisIndex >= 0) {
+      try {
+        const leftPixel = inst.convertToPixel({ xAxisIndex: primaryXAxisIndex }, 0);
+        const rightPixel = inst.convertToPixel({ xAxisIndex: primaryXAxisIndex }, xAxes[primaryXAxisIndex]?.data?.length - 1 || 0);
+        const leftValue = Array.isArray(leftPixel) ? leftPixel[0] : leftPixel;
+        const rightValue = Array.isArray(rightPixel) ? rightPixel[0] : rightPixel;
+
+        if (Number.isFinite(leftValue) && Number.isFinite(rightValue)) {
+          plotLeft = Math.max(0, Math.min(leftValue, rightValue));
+          plotRight = Math.min(rect.width, Math.max(leftValue, rightValue));
+        }
+      } catch { }
+    }
+
+    return { rect, ladder, rows, plotLeft, plotRight };
   }
 
   function resolveRowFromClientY(geometry, clientY) {
@@ -196,6 +214,78 @@
   function getRenderedLadder() {
     const geometry = buildRowGeometry();
     return geometry?.ladder || [];
+  }
+
+  function ensureSelectionOverlay() {
+    let overlay = document.getElementById("liq-selection-overlay");
+
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "liq-selection-overlay";
+
+      Object.assign(overlay.style, {
+        position: "absolute",
+        pointerEvents: "none",
+        display: "none",
+        boxSizing: "border-box",
+        borderTop: "2px solid #ff6b6b",
+        borderBottom: "2px solid #ff6b6b",
+        background: "linear-gradient(180deg, rgba(255,107,107,0.30), rgba(255,107,107,0.14))",
+        boxShadow: "0 0 0 1px rgba(255,107,107,0.26) inset"
+      });
+    }
+
+    const container = getHeatmapInstance()?.getDom();
+    if (!container) return null;
+
+    const containerStyle = window.getComputedStyle(container);
+    if (containerStyle.position === "static") {
+      container.style.position = "relative";
+    }
+
+    if (overlay.parentElement !== container) {
+      container.appendChild(overlay);
+    }
+
+    return overlay;
+  }
+
+  function clearSelectionHighlight() {
+    const overlay = document.getElementById("liq-selection-overlay");
+    if (!overlay) return;
+
+    overlay.style.display = "none";
+  }
+
+  function drawSelectionHighlight(geometry, range) {
+    const overlay = ensureSelectionOverlay();
+    if (!overlay) return;
+
+    const topRow = geometry.rows.find(row => row.rowIndex === range.topIndex);
+    const bottomRow = geometry.rows.find(row => row.rowIndex === range.bottomIndex);
+    if (!topRow || !bottomRow) {
+      clearSelectionHighlight();
+      return;
+    }
+
+    const top = Math.max(0, topRow.topBoundary === -Infinity ? 0 : topRow.topBoundary);
+    const bottom = Math.min(geometry.rect.height, bottomRow.bottomBoundary === Infinity ? geometry.rect.height : bottomRow.bottomBoundary);
+    const left = Math.max(0, geometry.plotLeft);
+    const right = Math.min(geometry.rect.width, geometry.plotRight);
+
+    Object.assign(overlay.style, {
+      display: "block",
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${Math.max(2, right - left)}px`,
+      height: `${Math.max(2, bottom - top)}px`
+    });
+  }
+
+  function closeRegionOverlay() {
+    const box = document.getElementById("liq-region-panel");
+    if (box) box.remove();
+    clearSelectionHighlight();
   }
 
   function getInclusiveRowRange(geometry, a, b) {
@@ -384,13 +474,21 @@
     }
 
     box.innerHTML = `
-      <b>Selected Region</b><br><br>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <b>Selected Region</b>
+        <button id="liq-region-close" style="background:#1b1b1b;color:#fff;border:1px solid #fff;border-radius:6px;padding:0px 8px 2px;font:inherit;cursor:pointer;">x</button>
+      </div><br>
       Top: ${max.toFixed(2)}<br>
       Bottom: ${min.toFixed(2)}<br><br>
       Rows: ${stats.clusterCount}<br>
       Clusters: ${stats.activeClusterCount}<br>
       Liquidity: $${Math.round(stats.totalLiquidity).toLocaleString()}
     `;
+
+    const closeButton = document.getElementById("liq-region-close");
+    if (closeButton) {
+      closeButton.onclick = closeRegionOverlay;
+    }
   }
 
   /* -------------------------------------------------
@@ -404,6 +502,7 @@
     if (!container) return;
 
     container.addEventListener("mousedown", e => {
+      clearSelectionHighlight();
       selection.active = true;
       selection.startY = e.clientY;
       selection.endY = null;
@@ -515,6 +614,7 @@
       clusters: stats.clusterCount,
       liquidity: stats.totalLiquidity
     }));
+    drawSelectionHighlight(geometry, range);
     renderRegionOverlay(bottomPrice, topPrice, stats);
   }
 
