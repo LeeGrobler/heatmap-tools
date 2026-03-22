@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (19)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (28)");
 
   /* -------------------------------------------------
     FOUNDATION 1 — DATA EXTRACTION (unchanged)
@@ -65,7 +65,6 @@
     window.__liqClusters = data.liq.map(([t, p, v]) => ({ timeIndex: t, priceIndex: p, price: data.y[p], liquidity: v }));
 
     renderOverlay(computeNearestClusters(data, window.__liqClusters));
-    console.log("Heatmap dataset updated:", __liqClusters.length, "clusters");
   }
 
   setInterval(updateDataset, 1500);
@@ -120,8 +119,6 @@
     const primaryXAxisIndex = xAxes.findIndex(Boolean);
 
     const ladder = categoryAxis.data;
-    const buildLog = { ladderLength: ladder.length, instExists: !!inst, categoryAxisIndex, primaryXAxisIndex };
-    console.log("[Resolver] Built with state:", JSON.stringify(buildLog));
 
     const rect = inst.getDom().getBoundingClientRect();
     const rows = ladder.map((price, rowIndex) => {
@@ -180,7 +177,7 @@
 
     if (!row) return null;
 
-    const result = {
+    return {
       clientY,
       localY,
       rowIndex: row.rowIndex,
@@ -190,8 +187,6 @@
       topBoundary: row.topBoundary,
       bottomBoundary: row.bottomBoundary
     };
-    console.log("[Resolution] Success:", JSON.stringify(result));
-    return result;
   }
 
   /* -------------------------------------------------
@@ -281,6 +276,115 @@
     overlay.style.display = "none";
   }
 
+  function ensureCurrentPriceOverlay() {
+    let overlay = document.getElementById("liq-current-price-overlay");
+
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "liq-current-price-overlay";
+
+      Object.assign(overlay.style, {
+        position: "absolute",
+        pointerEvents: "none",
+        display: "none",
+        background: "rgba(0,0,0,0.35)",
+        boxShadow: "0 0 0 1px rgba(0,0,0,0.18) inset"
+      });
+    }
+
+    const container = getHeatmapInstance()?.getDom();
+    if (!container) return null;
+
+    const containerStyle = window.getComputedStyle(container);
+    if (containerStyle.position === "static") {
+      container.style.position = "relative";
+    }
+
+    if (overlay.parentElement !== container) {
+      container.appendChild(overlay);
+    }
+
+    return overlay;
+  }
+
+  function drawCurrentPriceHighlight(currentPrice) {
+    const geometry = buildRowGeometry();
+    const overlay = ensureCurrentPriceOverlay();
+    if (!geometry || !overlay) return;
+
+    const rowIndex = findNearestPriceRowIndex(geometry.ladder, currentPrice);
+    const row = geometry.rows.find(item => item.rowIndex === rowIndex);
+    if (!row) {
+      overlay.style.display = "none";
+      return;
+    }
+
+    const top = Math.max(0, row.topBoundary === -Infinity ? 0 : row.topBoundary);
+    const bottom = Math.min(geometry.rect.height, row.bottomBoundary === Infinity ? geometry.rect.height : row.bottomBoundary);
+    const left = Math.max(0, geometry.plotLeft);
+    const right = Math.min(geometry.rect.width, geometry.plotRight);
+
+    Object.assign(overlay.style, {
+      display: "block",
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${Math.max(2, right - left)}px`,
+      height: `${Math.max(1, bottom - top)}px`
+    });
+  }
+
+  function ensureSelectionCounter() {
+    let counter = document.getElementById("liq-selection-counter");
+
+    if (!counter) {
+      counter = document.createElement("div");
+      counter.id = "liq-selection-counter";
+
+      Object.assign(counter.style, {
+        position: "fixed",
+        zIndex: 1000000,
+        display: "none",
+        pointerEvents: "none",
+        background: "#111",
+        color: "#fff",
+        padding: "6px 10px",
+        border: "1px solid #fff",
+        borderRadius: "10px",
+        fontFamily: "monospace",
+        fontSize: "13px",
+        lineHeight: "1.3",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.30)"
+      });
+
+      document.body.appendChild(counter);
+    }
+
+    return counter;
+  }
+
+  function hideSelectionCounter() {
+    const counter = document.getElementById("liq-selection-counter");
+    if (!counter) return;
+
+    counter.style.display = "none";
+  }
+
+  function updateSelectionCounter(rowCount) {
+    const counter = ensureSelectionCounter();
+    if (!counter) return;
+    const toolsPanel = ensureOverlayPanel();
+    const panelRect = toolsPanel.getBoundingClientRect();
+
+    counter.textContent = `${rowCount} row${rowCount === 1 ? "" : "s"}`;
+    Object.assign(counter.style, {
+      display: "block",
+      left: `${panelRect.left}px`,
+      top: `${panelRect.bottom + 8}px`,
+      minWidth: `${panelRect.width}px`,
+      textAlign: "center"
+    });
+  }
+
   function drawSelectionHighlight(geometry, range) {
     const overlay = ensureSelectionOverlay();
     if (!overlay) return;
@@ -344,19 +448,29 @@
   function computeNearestClusters(data, clusters) {
     const price = getCurrentPrice(data);
     const latest = data.prices.length - 1;
+    const ladder = Array.isArray(data.y) ? data.y : [];
+    const currentPriceRowIndex = findNearestPriceRowIndex(ladder, price);
+    const maxRowsAbove = Math.max(0, ladder.length - 1 - currentPriceRowIndex);
+    const maxRowsBelow = Math.max(0, currentPriceRowIndex);
+    const biasRowsChecked = Math.min(maxRowsAbove, maxRowsBelow);
+    const minBiasIndex = Math.max(0, currentPriceRowIndex - biasRowsChecked);
+    const maxBiasIndex = Math.min(ladder.length - 1, currentPriceRowIndex + biasRowsChecked);
     const rows = clusters.filter(c => c.timeIndex === latest);
-    const above = rows.filter(c => c.price > price);
-    const below = rows.filter(c => c.price < price);
+    const rowsInBiasWindow = rows.filter(c => c.priceIndex >= minBiasIndex && c.priceIndex <= maxBiasIndex);
+    const above = rowsInBiasWindow.filter(c => c.priceIndex > currentPriceRowIndex);
+    const below = rowsInBiasWindow.filter(c => c.priceIndex < currentPriceRowIndex);
 
     above.sort((a, b) => a.price - b.price);
     below.sort((a, b) => b.price - a.price);
 
     return {
       currentPrice: price,
+      currentPriceRowIndex,
       nearestAbove: above[0],
       nearestBelow: below[0],
       totalAbove: above.reduce((s, c) => s + c.liquidity, 0),
-      totalBelow: below.reduce((s, c) => s + c.liquidity, 0)
+      totalBelow: below.reduce((s, c) => s + c.liquidity, 0),
+      biasRowsChecked
     };
   }
 
@@ -433,33 +547,6 @@
       });
     }
 
-    // Add detailed logging
-    const debugLog = {
-      minIndex,
-      maxIndex,
-      minPrice: ladder[minIndex],
-      maxPrice: ladder[maxIndex],
-      rangeSize: maxIndex - minIndex + 1,
-      ladderLength: ladder.length,
-      totalClustersAtLatestTime: allLatestClusters.length,
-      selectedRowCount,
-      matchedByLatestPriceIndex: selected.length,
-      totalSelectedLiquidity: selectedLiquidity,
-      currentPrice,
-      currentPriceRowIndex,
-      priceIndexRangeAtLatest: allLatestClusters.length > 0 ? {
-        min: Math.min(...allLatestClusters.map(c => c.priceIndex)),
-        max: Math.max(...allLatestClusters.map(c => c.priceIndex))
-      } : null,
-      selectedRows,
-      selectedSample: selected.slice(0, 3).map(c => ({
-        priceIndex: c.priceIndex,
-        price: c.price.toFixed(2),
-        liquidity: c.liquidity
-      }))
-    };
-    console.log("[ComputeStats] Debug:", JSON.stringify(debugLog));
-
     return {
       clusterCount: selectedRowCount,
       activeClusterCount: selected.length,
@@ -514,6 +601,7 @@
   function renderOverlay(stats) {
     const panel = ensureOverlayPanel();
     const bias = stats.totalAbove > stats.totalBelow ? "UPWARD" : "DOWNWARD";
+    drawCurrentPriceHighlight(stats.currentPrice);
 
     panel.innerHTML = `
       <b>Liquidation Tools</b><br><br>
@@ -524,7 +612,8 @@
       Nearest Below:<br>
       ${formatPriceWithDistance(stats.nearestBelow?.price, stats.currentPrice)}<br>
       ${formatCurrency(stats.nearestBelow?.liquidity)}<br><br>
-      Bias: ${bias}
+      Bias: ${bias}<br>
+      (${stats.biasRowsChecked} rows checked)
     `;
   }
 
@@ -556,9 +645,9 @@
     }
 
     const distanceLine = stats.distance?.anchor === "inside"
-      ? `Distance: 0 rows (${formatCurrency(0)} - 0.00%) [inside]`
+      ? `Distance: 0 rows [inside]<br>${formatCurrency(0)} - 0.00%`
       : stats.distance
-        ? `Distance: ${stats.distance.rows} rows (${formatCurrency(stats.distance.priceDistance)} - ${formatPercentDistance(stats.distance.edgePrice, stats.currentPrice)}%)`
+        ? `Distance: ${stats.distance.rows} rows<br>${formatCurrency(stats.distance.priceDistance)} - ${formatPercentDistance(stats.distance.edgePrice, stats.currentPrice)}%`
         : `Distance: n/a`;
 
     box.innerHTML = `
@@ -585,114 +674,115 @@
     DRAG SELECTION
   ------------------------------------------------- */
 
-  let selection = { active: false, startY: null, endY: null };
+  let selection = { active: false, startY: null, endY: null, pointerId: null };
+
+  function finalizeSelection(clientY) {
+    if (!selection.active) return;
+
+    selection.active = false;
+    selection.endY = clientY;
+    selection.pointerId = null;
+    hideSelectionCounter();
+
+    if (selection.startY !== null && selection.endY !== null) {
+      handleSelection();
+    }
+  }
+
+  function updateLiveSelectionCounter(clientY) {
+    if (!selection.active || selection.startY === null) return;
+
+    const geometry = buildRowGeometry();
+    if (!geometry) return;
+
+    const startRow = resolveRowFromClientY(geometry, selection.startY);
+    const currentRow = resolveRowFromClientY(geometry, clientY);
+    if (!startRow || !currentRow) return;
+
+    const liveRange = getInclusiveRowRange(geometry, startRow, currentRow);
+    updateSelectionCounter(liveRange.maxIndex - liveRange.minIndex + 1);
+  }
 
   function installDragSelection() {
     const container = getHeatmapInstance()?.getDom();
     if (!container) return;
 
-    container.addEventListener("mousedown", e => {
+    container.addEventListener("pointerdown", e => {
+      if (e.button !== 0) return;
       clearSelectionHighlight();
+      hideSelectionCounter();
       selection.active = true;
+      selection.pointerId = e.pointerId;
       selection.startY = e.clientY;
       selection.endY = null;
+      updateLiveSelectionCounter(e.clientY);
+      try {
+        container.setPointerCapture(e.pointerId);
+      } catch { }
     });
 
-    container.addEventListener("mousemove", e => {
-      if (selection.active && selection.startY !== null) {
-        selection.endY = e.clientY;
-      }
-    });
-
-    container.addEventListener("mouseup", e => {
+    document.addEventListener("pointermove", e => {
       if (!selection.active) return;
-
-      selection.active = false;
+      if (selection.pointerId !== null && e.pointerId !== selection.pointerId) return;
       selection.endY = e.clientY;
+      updateLiveSelectionCounter(e.clientY);
+    }, true);
 
-      if (selection.startY !== null && selection.endY !== null) {
-        handleSelection();
-      }
+    container.addEventListener("pointerup", e => {
+      if (!selection.active) return;
+      if (selection.pointerId !== null && e.pointerId !== selection.pointerId) return;
+      finalizeSelection(e.clientY);
     });
 
-    document.addEventListener("mouseup", e => {
-      selection.active = false;
+    document.addEventListener("pointerup", e => {
+      if (!selection.active) return;
+      if (selection.pointerId !== null && e.pointerId !== selection.pointerId) return;
+      finalizeSelection(e.clientY);
+    }, true);
+
+    container.addEventListener("lostpointercapture", e => {
+      if (!selection.active) return;
+      if (selection.pointerId !== null && e.pointerId !== selection.pointerId) return;
+      finalizeSelection(selection.endY ?? selection.startY);
+    });
+
+    container.addEventListener("pointercancel", e => {
+      if (!selection.active) return;
+      if (selection.pointerId !== null && e.pointerId !== selection.pointerId) return;
+      finalizeSelection(selection.endY ?? selection.startY);
     });
   }
 
   function handleSelection() {
-    const selectionLog = JSON.stringify({ startY: selection.startY, endY: selection.endY });
-    console.log("[Selection] Starting with:", selectionLog);
-
-    // Try to resolve both endpoints, with a second attempt if first fails
     const resolve1 = getResolver();
-    if (!resolve1) {
-      console.warn("[Selection] Failed to build initial resolver");
-      return;
-    }
+    if (!resolve1) return;
 
     let a = resolve1(selection.startY);
 
-    // If startY failed, try rebuilding resolver and retry once
     if (!a) {
-      console.log("[Selection] First resolution of startY failed, retrying with fresh resolver");
       const resolve2 = getResolver();
       a = resolve2(selection.startY);
     }
 
     const b = resolve1(selection.endY);
 
-    // If endY failed, try with fresh resolver
     let b_final = b;
     if (!b) {
-      console.log("[Selection] Resolution of endY failed, retrying with fresh resolver");
       const resolve3 = getResolver();
       b_final = resolve3(selection.endY);
     }
 
-    const resolutionLog = JSON.stringify({
-      a_success: !!a,
-      b_success: !!b_final,
-      a: a ? { localY: a.localY, rowIndex: a.rowIndex, visualIndex: a.visualIndex, price: a.price } : null,
-      b: b_final ? { localY: b_final.localY, rowIndex: b_final.rowIndex, visualIndex: b_final.visualIndex, price: b_final.price } : null,
-      startY: selection.startY,
-      endY: selection.endY
-    });
-    console.log("[Selection] Resolution results:", resolutionLog);
-
-    if (!a || !b_final) {
-      console.warn("[Selection] Failed to resolve both endpoints after retry", resolutionLog);
-      return;
-    }
+    if (!a || !b_final) return;
 
     const geometry = buildRowGeometry();
-    if (!geometry || !geometry.ladder.length) {
-      console.warn("[Selection] No rendered ladder found");
-      return;
-    }
+    if (!geometry || !geometry.ladder.length) return;
 
     const range = getInclusiveRowRange(geometry, a, b_final);
     const topPrice = normalizePriceValue(geometry.ladder[range.topIndex]);
     const bottomPrice = normalizePriceValue(geometry.ladder[range.bottomIndex]);
 
-    // Log the indices being passed to compute stats
-    const indicesLog = JSON.stringify({
-      minIndex: range.minIndex,
-      maxIndex: range.maxIndex,
-      topIndex: range.topIndex,
-      bottomIndex: range.bottomIndex,
-      startLocalY: a.localY,
-      endLocalY: b_final.localY,
-      topPrice,
-      bottomPrice
-    });
-    console.log("[Selection] Calling computeRegionStats with indices:", indicesLog);
-
     const stats = computeRegionStats(range.minIndex, range.maxIndex);
-    if (!stats || topPrice === null || bottomPrice === null) {
-      console.warn("[Selection] Failed to compute stats or display prices", JSON.stringify({ statsExists: !!stats, topPrice, bottomPrice }));
-      return;
-    }
+    if (!stats || topPrice === null || bottomPrice === null) return;
 
     stats.distance = buildSelectionDistance(
       stats.currentPrice,
@@ -702,19 +792,6 @@
       geometry.ladder
     );
 
-    console.log("[Selection] Computed stats:", JSON.stringify({
-      minIndex: range.minIndex,
-      maxIndex: range.maxIndex,
-      topIndex: range.topIndex,
-      bottomIndex: range.bottomIndex,
-      topPrice: topPrice.toFixed(2),
-      bottomPrice: bottomPrice.toFixed(2),
-      currentPrice: stats.currentPrice.toFixed(2),
-      currentPriceRowIndex: stats.currentPriceRowIndex,
-      distance: stats.distance,
-      clusters: stats.clusterCount,
-      liquidity: stats.totalLiquidity
-    }));
     drawSelectionHighlight(geometry, range);
     renderRegionOverlay(bottomPrice, topPrice, stats);
   }
