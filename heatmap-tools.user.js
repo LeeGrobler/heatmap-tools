@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (39)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (40)");
 
   const SELECTION_STYLES = [
     {
@@ -447,16 +447,15 @@
   function updateSelectionCounter(rowCount) {
     const counter = ensureSelectionCounter();
     if (!counter) return;
-    const toolsPanel = ensureOverlayPanel();
-    const panelRect = toolsPanel.getBoundingClientRect();
 
     counter.textContent = `${rowCount} row${rowCount === 1 ? "" : "s"}`;
     Object.assign(counter.style, {
       display: "block",
-      left: `${panelRect.left}px`,
-      top: `${panelRect.bottom + 8}px`,
-      minWidth: `${panelRect.width}px`,
-      textAlign: "center"
+      left: "50%",
+      top: "14px",
+      minWidth: "140px",
+      textAlign: "center",
+      transform: "translateX(-50%)"
     });
   }
 
@@ -727,7 +726,7 @@
       Object.assign(panel.style, {
         position: "fixed",
         top: "110px",
-        right: "10px",
+        left: "10px",
         zIndex: 999999,
         background: "#111",
         color: "#fff",
@@ -760,7 +759,7 @@
 
     Object.assign(box.style, {
       position: "fixed",
-      left: `${10 + (index * 290)}px`,
+      left: `${255 + (index * 290)}px`,
       top: "110px",
       width: "270px",
       zIndex: 999999,
