@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (36)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (39)");
 
   const SELECTION_STYLES = [
     {
@@ -252,6 +252,51 @@
     if (value === -Infinity) return "-Infinity";
     if (!Number.isFinite(value)) return "n/a";
     return value.toFixed(2);
+  }
+
+  function formatCompactMetric(value) {
+    if (value === Infinity) return "Infinity";
+    if (value === -Infinity) return "-Infinity";
+    if (!Number.isFinite(value)) return "n/a";
+    return value.toFixed(2);
+  }
+
+  function safeDivide(numerator, denominator) {
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) return NaN;
+    if (denominator === 0) return numerator > 0 ? Infinity : 0;
+    return numerator / denominator;
+  }
+
+  function classifySandwichStrength(ratio) {
+    if (!Number.isFinite(ratio)) return "n/a";
+    if (ratio >= 0.75) return "STRONG";
+    if (ratio >= 0.45) return "MODERATE";
+    if (ratio > 0) return "WEAK";
+    return "NONE";
+  }
+
+  function classifyZoneType(continuityScore, peakConcentrationRatio) {
+    if (continuityScore > 0.7 && peakConcentrationRatio < 0.35) return "CONTINUOUS STACK";
+    if (continuityScore <= 0.4) return "FRAGMENTED POCKET";
+    if (peakConcentrationRatio >= 0.5) return "SINGLE SPIKE";
+    return "HYBRID CLUSTER";
+  }
+
+  function classifyCascadeProbability(densityScore, continuityScore) {
+    if (densityScore >= 5000000 && continuityScore >= 0.7) return "HIGH";
+    if (densityScore >= 2000000 && continuityScore >= 0.5) return "MODERATE";
+    return "LOW";
+  }
+
+  function classifyRegionBias(regionPullScore, oppositePullScore) {
+    if (!Number.isFinite(regionPullScore)) return "n/a";
+    if (!Number.isFinite(oppositePullScore) || oppositePullScore <= 0) return "UNOPPOSED";
+
+    const ratio = regionPullScore / oppositePullScore;
+    if (ratio >= 1.5) return "STRONG";
+    if (ratio >= 1.1) return "MODERATE";
+    if (ratio >= 0.9) return "BALANCED";
+    return "WEAK";
   }
 
   function getRenderedLadder() {
@@ -499,18 +544,38 @@
     above.sort((a, b) => a.price - b.price);
     below.sort((a, b) => b.price - a.price);
 
+    const nearestAbove = above[0];
+    const nearestBelow = below[0];
     const totalAbove = above.reduce((s, c) => s + c.liquidity, 0);
     const totalBelow = below.reduce((s, c) => s + c.liquidity, 0);
+    const nearestAboveDistancePercent = nearestAbove ? Number(formatPercentDistance(nearestAbove.price, price)) : NaN;
+    const nearestBelowDistancePercent = nearestBelow ? Number(formatPercentDistance(nearestBelow.price, price)) : NaN;
+    const weightedPullAbove = safeDivide(totalAbove, nearestAboveDistancePercent) / 1000000;
+    const weightedPullBelow = safeDivide(totalBelow, nearestBelowDistancePercent) / 1000000;
+    const sandwichThreshold = 5000000;
+    const sandwich = (Number(nearestAbove?.liquidity) || 0) > sandwichThreshold && (Number(nearestBelow?.liquidity) || 0) > sandwichThreshold;
+    const sandwichStrengthRatio = safeDivide(
+      Math.min(Number(nearestAbove?.liquidity) || 0, Number(nearestBelow?.liquidity) || 0),
+      Math.max(Number(nearestAbove?.liquidity) || 0, Number(nearestBelow?.liquidity) || 0)
+    );
 
     return {
       currentPrice: price,
       currentPriceRowIndex,
-      nearestAbove: above[0],
-      nearestBelow: below[0],
+      nearestAbove,
+      nearestBelow,
       totalAbove,
       totalBelow,
       biasRowsChecked,
-      dominanceRatio: totalBelow === 0 ? (totalAbove > 0 ? Infinity : 0) : totalAbove / totalBelow
+      dominanceRatio: totalBelow === 0 ? (totalAbove > 0 ? Infinity : 0) : totalAbove / totalBelow,
+      nearestAboveDistancePercent,
+      nearestBelowDistancePercent,
+      weightedPullAbove,
+      weightedPullBelow,
+      pullBias: weightedPullAbove >= weightedPullBelow ? "ABOVE" : "BELOW",
+      sandwich: sandwich ? "YES" : "NO",
+      sandwichStrength: sandwich ? classifySandwichStrength(sandwichStrengthRatio) : "NONE",
+      imbalanceScore: totalBelow === 0 ? (totalAbove > 0 ? Infinity : 0) : totalAbove / totalBelow
     };
   }
 
@@ -602,6 +667,19 @@
       rows: Math.abs(largestCluster.priceIndex - currentPriceRowIndex),
       percent: Number(formatPercentDistance(largestCluster.price, currentPrice))
     } : null;
+    const topPrice = normalizePriceValue(ladder[maxIndex]) || 0;
+    const bottomPrice = normalizePriceValue(ladder[minIndex]) || 0;
+    const distanceEdgePrice = currentPrice < bottomPrice ? bottomPrice : currentPrice > topPrice ? topPrice : currentPrice;
+    const distancePercent = Number(formatPercentDistance(distanceEdgePrice, currentPrice));
+    const rowSpanWidth = Math.abs(topPrice - bottomPrice);
+    const liquidityPerPercentMove = safeDivide(selectedLiquidity, distancePercent);
+    const regionPullScore = safeDivide(selectedLiquidity, distancePercent) / 1000000;
+    const regionMagnetStrength = largestCluster
+      ? safeDivide(Number(largestCluster.liquidity) || 0, largestClusterDistance?.percent || 0) / 1000000
+      : NaN;
+    const fragmentationIndex = (1 - continuityScore) * 100;
+    const zoneType = classifyZoneType(continuityScore, peakConcentrationRatio);
+    const cascadeProbability = classifyCascadeProbability(densityScore, continuityScore);
 
     return {
       clusterCount: selectedRowCount,
@@ -614,7 +692,14 @@
       largestClusterDistance,
       densityScore,
       continuityScore,
-      peakConcentrationRatio
+      peakConcentrationRatio,
+      rowSpanWidth,
+      liquidityPerPercentMove,
+      regionPullScore,
+      regionMagnetStrength,
+      fragmentationIndex,
+      zoneType,
+      cascadeProbability
     };
   }
 
@@ -651,7 +736,10 @@
         borderRadius: "10px",
         fontFamily: "monospace",
         fontSize: "13px",
-        lineHeight: "1.45"
+        lineHeight: "1.45",
+        maxHeight: "calc(100vh - 140px)",
+        overflowY: "auto",
+        boxSizing: "border-box"
       });
 
       document.body.appendChild(panel);
@@ -683,7 +771,10 @@
       borderRadius: "10px",
       fontFamily: "monospace",
       fontSize: "13px",
-      lineHeight: "1.45"
+      lineHeight: "1.45",
+      maxHeight: "calc(100vh - 140px)",
+      overflowY: "auto",
+      boxSizing: "border-box"
     });
 
     return box;
@@ -696,18 +787,31 @@
 
     panel.innerHTML = `
       <b>Heatmap Overview</b><br><br>
-      Price: ${formatPriceWithDistance(stats.currentPrice, stats.currentPrice)}<br><br>
-      Nearest Above:<br>
+      <b>Price:</b> ${formatPriceWithDistance(stats.currentPrice, stats.currentPrice)}<br><br>
+      <b>Directional Bias</b><br>
+      <b>Bias:</b> ${bias}<br>
+      <b>Dominance Ratio:</b> ${formatRatio(stats.dominanceRatio)}<br>
+      <b>Weighted Pull Above:</b> ${formatCompactMetric(stats.weightedPullAbove)}<br>
+      <b>Weighted Pull Below:</b> ${formatCompactMetric(stats.weightedPullBelow)}<br>
+      <b>Pull Bias:</b> ${stats.pullBias}<br><br>
+      <b>Nearest Liquidity Magnets</b><br>
+      <b>Nearest Above:</b><br>
       ${formatPriceWithDistance(stats.nearestAbove?.price, stats.currentPrice)}<br>
       ${formatCurrency(stats.nearestAbove?.liquidity)}<br><br>
-      Nearest Below:<br>
+      <b>Nearest Below:</b><br>
       ${formatPriceWithDistance(stats.nearestBelow?.price, stats.currentPrice)}<br>
       ${formatCurrency(stats.nearestBelow?.liquidity)}<br><br>
-      Total Above:<br>${formatCurrency(stats.totalAbove)}<br><br>
-      Total Below:<br>${formatCurrency(stats.totalBelow)}<br><br>
-      Bias: ${bias}<br>
-      Dominance Ratio: ${formatRatio(stats.dominanceRatio)}<br>
-      (${stats.biasRowsChecked} rows checked)
+      <b>Range Liquidity Totals</b><br>
+      <b>Total Above:</b><br>
+      ${formatCurrency(stats.totalAbove)}<br><br>
+      <b>Total Below:</b><br>
+      ${formatCurrency(stats.totalBelow)}<br><br>
+      <b>Sandwich Detection</b><br>
+      <b>Sandwich:</b> ${stats.sandwich}<br>
+      <b>Sandwich Strength:</b> ${stats.sandwichStrength}<br><br>
+      <b>Scan Context</b><br>
+      <b>Rows Compared:</b> ${stats.biasRowsChecked}<br>
+      <b>Imbalance Score:</b> ${formatRatio(stats.imbalanceScore)}
     `;
   }
 
@@ -717,7 +821,7 @@
     const box = ensureRegionPanel(index);
     const { bottomPrice: min, topPrice: max, stats } = selectionData;
     const distanceLine = stats.distance?.anchor === "inside"
-      ? `Distance: 0 rows [inside]<br>${formatCurrency(0)} - 0.00%`
+      ? `Distance: 0 rows [inside]<br>${formatCurrency(0)} (0.00%)`
       : stats.distance
         ? `Distance: ${stats.distance.rows} rows<br>${formatCurrency(stats.distance.priceDistance)} - ${formatPercentDistance(stats.distance.edgePrice, stats.currentPrice)}%`
         : `Distance: n/a`;
@@ -730,18 +834,32 @@
         <b>Selected Region ${index + 1}</b>
         <button id="liq-region-close-${index}" style="background:#1b1b1b;color:#fff;border:1px solid #fff;border-radius:6px;padding:0px 8px 2px;font:inherit;cursor:pointer;">x</button>
       </div><br>
-      Price: ${formatPriceWithDistance(stats.currentPrice, stats.currentPrice)}<br><br>
-      Top: ${formatPriceWithDistance(max, stats.currentPrice)}<br>
-      Bottom: ${formatPriceWithDistance(min, stats.currentPrice)}<br><br>
+      <b>Region Direction Signal</b><br>
+      <b>Region Pull Score:</b> ${formatCompactMetric(stats.regionPullScore)}<br>
+      <b>Region Magnet Strength:</b> ${formatCompactMetric(stats.regionMagnetStrength)}<br>
+      <b>Region Bias:</b> ${stats.regionBias}<br><br>
+      <b>Region Boundaries</b><br>
+      <b>Top:</b> ${formatPriceWithDistance(max, stats.currentPrice)}<br>
+      <b>Bottom:</b> ${formatPriceWithDistance(min, stats.currentPrice)}<br><br>
+      <b>Distance From Price</b><br>
       ${distanceLine}<br><br>
-      Rows: ${stats.clusterCount}<br>
-      Clusters: ${stats.activeClusterCount}<br>
-      Liquidity: ${formatCurrency(stats.totalLiquidity)}<br><br>
-      Avg Cluster Size: ${formatCurrency(stats.avgClusterSize)}<br>
-      Largest Cluster: ${largestClusterLine}<br><br>
-      Density Score: ${formatCurrency(stats.densityScore)}<br>
-      Continuity Score: ${(stats.continuityScore * 100).toFixed(2)}%<br>
-      Peak Concentration Ratio: ${formatRatio(stats.peakConcentrationRatio)}
+      <b>Region Liquidity Structure</b><br>
+      <b>Liquidity:</b> ${formatCurrency(stats.totalLiquidity)}<br>
+      <b>Clusters:</b> ${stats.activeClusterCount}<br>
+      <b>Rows:</b> ${stats.clusterCount}<br><br>
+      <b>Cluster Distribution Metrics</b><br>
+      <b>Avg Cluster Size:</b> ${formatCurrency(stats.avgClusterSize)}<br>
+      <b>Largest Cluster:</b> ${largestClusterLine}<br><br>
+      <b>Density Score:</b> ${formatCurrency(stats.densityScore)}<br>
+      <b>Continuity Score:</b> ${(stats.continuityScore * 100).toFixed(2)}%<br>
+      <b>Peak Concentration Ratio:</b> ${formatRatio(stats.peakConcentrationRatio)}<br><br>
+      <b>Distribution Classification</b><br>
+      <b>Zone Type:</b> ${stats.zoneType}<br>
+      <b>Cascade Probability:</b> ${stats.cascadeProbability}<br>
+      <b>Fragmentation Index:</b> ${stats.fragmentationIndex.toFixed(2)}%<br><br>
+      <b>Diagnostics</b><br>
+      <b>Row Span Width:</b> ${formatCurrency(stats.rowSpanWidth)}<br>
+      <b>Liquidity Per % Move:</b> ${formatCurrency(stats.liquidityPerPercentMove)}
     `;
 
     const closeButton = document.getElementById(`liq-region-close-${index}`);
@@ -753,6 +871,18 @@
   function renderSavedSelections() {
     clearSelectionHighlights();
     clearRegionPanels();
+
+    const pullScores = savedSelections.map(selectionData => selectionData.stats.regionPullScore);
+    savedSelections = savedSelections.map((selectionData, index) => ({
+      ...selectionData,
+      stats: {
+        ...selectionData.stats,
+        regionBias: classifyRegionBias(
+          selectionData.stats.regionPullScore,
+          pullScores[index === 0 ? 1 : 0]
+        )
+      }
+    }));
 
     const geometry = buildRowGeometry();
     savedSelections.forEach((selectionData, index) => {
