@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coinglass Heatmap Tools (Dev Build)
 // @namespace    coinglass-heatmap-tools
-// @version      0.45
+// @version      0.46
 // @description  Adds analytical tooling to Coinglass liquidation heatmap
 // @match        https://www.coinglass.com/*
 // @match        https://coinglass.com/*
@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting - 0.45");
+  console.log("Heatmap watcher booting - 0.46");
 
   const SELECTION_STYLES = [
     {
@@ -1016,7 +1016,6 @@
         ${renderStatRow("Cluster Count", escapeHtml(String(stats.activeClusterCount)))}
         ${renderSectionHeading("Structure Quality")}
         ${renderStatRow("Continuity Score", escapeHtml(Number.isFinite(continuityPercent) ? `${continuityPercent.toFixed(2)}%` : "n/a"))}
-        ${renderStatRow("Fragmentation Index", escapeHtml(Number.isFinite(fragmentationIndex) ? `${fragmentationIndex.toFixed(2)}%` : "n/a"))}
         ${renderStatRow("Peak Concentration Ratio", escapeHtml(formatRatio(stats.peakConcentrationRatio)))}
         ${renderStatRow("Structure Quality", escapeHtml(stats.structureQuality), "STRONG | MODERATE | WEAK")}
         <br>
