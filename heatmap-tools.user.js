@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coinglass Heatmap Tools (Dev Build)
 // @namespace    coinglass-heatmap-tools
-// @version      0.47
+// @version      0.48
 // @description  Adds analytical tooling to Coinglass liquidation heatmap
 // @match        https://www.coinglass.com/*
 // @match        https://coinglass.com/*
@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting - 0.47");
+  console.log("Heatmap watcher booting - 0.48");
 
   const SELECTION_STYLES = [
     {
@@ -294,6 +294,48 @@
     if (score > 0) return "UP";
     if (score < 0) return "DOWN";
     return "FLAT";
+  }
+
+  function classifyPullStrength(score) {
+    const magnitude = Math.abs(Number(score));
+    if (!Number.isFinite(magnitude)) return "n/a";
+    if (magnitude <= 0.15) return "NEUTRAL";
+    if (magnitude <= 0.35) return "MILD";
+    if (magnitude <= 0.60) return "MODERATE";
+    return "STRONG";
+  }
+
+  function classifyDominanceStrength(score) {
+    const magnitude = Math.abs(Number(score));
+    if (!Number.isFinite(magnitude)) return "n/a";
+    if (magnitude <= 0.10) return "NEUTRAL";
+    if (magnitude <= 0.25) return "MILD";
+    if (magnitude <= 0.45) return "MODERATE";
+    return "STRONG";
+  }
+
+  function classifyContinuityBand(continuityPercent) {
+    const value = Number(continuityPercent);
+    if (!Number.isFinite(value)) return "n/a";
+    if (value >= 75) return "HIGH";
+    if (value >= 50) return "MODERATE";
+    return "LOW";
+  }
+
+  function classifyFragmentationBand(fragmentationPercent) {
+    const value = Number(fragmentationPercent);
+    if (!Number.isFinite(value)) return "n/a";
+    if (value <= 20) return "CLEAN";
+    if (value <= 40) return "MODERATE";
+    return "FRAGMENTED";
+  }
+
+  function classifyPeakConcentrationBand(ratio) {
+    const value = Number(ratio);
+    if (!Number.isFinite(value)) return "n/a";
+    if (value <= 0.20) return "LOW";
+    if (value <= 0.40) return "MODERATE";
+    return "HIGH";
   }
 
   function escapeHtml(value) {
@@ -967,8 +1009,10 @@
   function renderOverlay(stats) {
     const panel = ensureOverlayPanel();
     const content = panel.querySelector(".liq-panel-content");
-    const dominanceDisplay = `${formatSignedMetric(stats.dominanceScore)} (${stats.dominanceLabel})`;
-    const pullDisplay = `${formatSignedMetric(stats.pullScore)} (${stats.pullLabel})`;
+    const dominanceStrength = classifyDominanceStrength(stats.dominanceScore);
+    const pullStrength = classifyPullStrength(stats.pullScore);
+    const dominanceDisplay = `${formatSignedMetric(stats.dominanceScore)} (${dominanceStrength} ${stats.dominanceLabel})`;
+    const pullDisplay = `${formatSignedMetric(stats.pullScore)} (${pullStrength} ${stats.pullLabel})`;
     const sandwichRow = stats.sandwich
       ? renderStatRow("Sandwich", escapeHtml(stats.sandwichStrength), "WEAK | MODERATE | STRONG")
       : "";
@@ -1000,8 +1044,18 @@
       ? Number(stats.continuityPercent)
       : Number(stats.continuityScore) * 100;
     const fragmentationIndex = Number(stats.fragmentationIndex);
+    const peakConcentrationRatio = Number(stats.peakConcentrationRatio);
     const distanceDisplay = Number.isFinite(distancePrice) && Number.isFinite(distancePercent)
       ? `${formatCurrency(distancePrice)} (${distancePercent.toFixed(2)}%)`
+      : "n/a";
+    const continuityDisplay = Number.isFinite(continuityPercent)
+      ? `${continuityPercent.toFixed(2)}% (${classifyContinuityBand(continuityPercent)})`
+      : "n/a";
+    const fragmentationDisplay = Number.isFinite(fragmentationIndex)
+      ? `${fragmentationIndex.toFixed(2)}% (${classifyFragmentationBand(fragmentationIndex)})`
+      : "n/a";
+    const peakConcentrationDisplay = Number.isFinite(peakConcentrationRatio)
+      ? `${formatRatio(peakConcentrationRatio)} (${classifyPeakConcentrationBand(peakConcentrationRatio)})`
       : "n/a";
 
     box.innerHTML = `
@@ -1015,9 +1069,9 @@
         ${renderStatRow("Total Liquidity", escapeHtml(formatCurrency(stats.totalLiquidity)))}
         ${renderStatRow("Cluster Count", escapeHtml(String(stats.activeClusterCount)))}
         ${renderSectionHeading("Structure Quality")}
-        ${renderStatRow("Continuity Score", escapeHtml(Number.isFinite(continuityPercent) ? `${continuityPercent.toFixed(2)}%` : "n/a"))}
-        ${renderStatRow("Fragmentation Index", escapeHtml(Number.isFinite(fragmentationIndex) ? `${fragmentationIndex.toFixed(2)}%` : "n/a"))}
-        ${renderStatRow("Peak Concentration Ratio", escapeHtml(formatRatio(stats.peakConcentrationRatio)))}
+        ${renderStatRow("Continuity Score", escapeHtml(continuityDisplay))}
+        ${renderStatRow("Fragmentation Index", escapeHtml(fragmentationDisplay))}
+        ${renderStatRow("Peak Concentration Ratio", escapeHtml(peakConcentrationDisplay))}
         ${renderStatRow("Structure Quality", escapeHtml(stats.structureQuality), "STRONG | MODERATE | WEAK")}
         <br>
         ${renderStatRow("Zone Type", escapeHtml(stats.zoneType), "CONTINUOUS STACK | LAYERED STACK | FRAGMENTED | SINGLE MAGNET")}
