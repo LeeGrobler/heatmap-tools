@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coinglass Heatmap Tools (Dev Build)
 // @namespace    coinglass-heatmap-tools
-// @version      0.3
+// @version      0.42
 // @description  Adds analytical tooling to Coinglass liquidation heatmap
 // @match        https://www.coinglass.com/*
 // @match        https://coinglass.com/*
@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (42)");
+  console.log("Heatmap watcher booting - 0.42");
 
   const SELECTION_STYLES = [
     {

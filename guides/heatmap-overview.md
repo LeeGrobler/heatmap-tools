@@ -57,16 +57,16 @@ Compares total liquidity above vs below, ignoring distance, making it the **broa
 - **0.25 to 0.45**: Moderate bias
 - **0.45 to 1.00**: Strong bias
 
-"0.29 UP", for instance, means "moderate upward overall liquidity field."
+"0.29 (UP)", for instance, means "moderate upward overall liquidity field."
 
-Dominance matters more for **where price may want to migrate over a larger move**, as opposed to Pull Score's next likely push. So if Pull Score and Dominance **agree** $\rightarrow$ **stronger conviction**, and if Pull Score and Dominance **disagree** $\rightarrow$ like **more complex path**.
+Dominance matters more for **where price may want to migrate over a larger move**, as opposed to Pull Score's next likely push. So if Pull Score and Dominance **agree** = **stronger conviction**, and if Pull Score and Dominance **disagree** = like **more complex path**.
 
 
 ### Nearest Magnets
 
 These are the **closest non-zero liquidity rows** above and below the current price, represented as the **absolute price** value of the row (`$66,559.27`) and the **distance from price** as a percentage. (`0.11%`). It is useful because price often moves stepwise through liquidity.
 
-If the **nearest magnet** agrees with Pull Score, it says "that side **is much more likely to be tested first**". Nearest magnets are mainly for **which side likely gets touched first** and not how far the mve goes after that.
+If the **nearest magnet** agrees with Pull Score, it says "that side **is much more likely to be tested first**". Nearest magnets are mainly for **which side likely gets touched first** and not how far the move goes after that.
 
 **They are a first-destination clue**, not a full path forecast.
 
