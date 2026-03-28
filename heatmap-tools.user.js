@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (41)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (42)");
 
   const SELECTION_STYLES = [
     {
@@ -955,7 +955,7 @@
     drawCurrentPriceHighlight(stats.currentPrice);
 
     content.innerHTML = `
-      ${renderStatRow("Price", escapeHtml(formatPriceWithDistance(stats.currentPrice, stats.currentPrice)))}
+      ${renderStatRow("Price", escapeHtml(formatCurrency(stats.currentPrice)))}
       ${renderSectionHeading("Directional Bias")}
       ${sandwichRow}
       ${renderStatRow("Pull Score", escapeHtml(pullDisplay), "UP | DOWN | FLAT")}
