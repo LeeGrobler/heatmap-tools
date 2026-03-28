@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coinglass Heatmap Tools (Dev Build)
 // @namespace    coinglass-heatmap-tools
-// @version      0.42
+// @version      0.44
 // @description  Adds analytical tooling to Coinglass liquidation heatmap
 // @match        https://www.coinglass.com/*
 // @match        https://coinglass.com/*
@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting - 0.42");
+  console.log("Heatmap watcher booting - 0.44");
 
   const SELECTION_STYLES = [
     {
@@ -334,15 +334,21 @@
 
   function classifyZoneType(continuityScore, peakConcentrationRatio) {
     if (continuityScore > 0.7 && peakConcentrationRatio < 0.35) return "CONTINUOUS STACK";
-    if (continuityScore <= 0.4) return "FRAGMENTED POCKET";
-    if (peakConcentrationRatio >= 0.5) return "SINGLE SPIKE";
-    return "HYBRID CLUSTER";
+    if (continuityScore <= 0.4) return "FRAGMENTED";
+    if (peakConcentrationRatio >= 0.5) return "SINGLE MAGNET";
+    return "LAYERED STACK";
   }
 
   function classifyCascadeProbability(densityScore, continuityScore) {
     if (densityScore >= 5000000 && continuityScore >= 0.7) return "HIGH";
     if (densityScore >= 2000000 && continuityScore >= 0.5) return "MODERATE";
     return "LOW";
+  }
+
+  function classifyStructureQuality(continuityPercent, fragmentationIndex, peakConcentrationRatio) {
+    if (continuityPercent >= 75 && fragmentationIndex <= 20 && peakConcentrationRatio <= 0.20) return "STRONG";
+    if (continuityPercent >= 50 && fragmentationIndex <= 40 && peakConcentrationRatio <= 0.40) return "MODERATE";
+    return "WEAK";
   }
 
   function classifyRegionBias(regionPullScore, oppositePullScore) {
@@ -737,8 +743,10 @@
       ? safeDivide(Number(largestCluster.liquidity) || 0, largestClusterDistance?.percent || 0) / 1000000
       : NaN;
     const fragmentationIndex = (1 - continuityScore) * 100;
+    const continuityPercent = continuityScore * 100;
     const zoneType = classifyZoneType(continuityScore, peakConcentrationRatio);
     const cascadeProbability = classifyCascadeProbability(densityScore, continuityScore);
+    const structureQuality = classifyStructureQuality(continuityPercent, fragmentationIndex, peakConcentrationRatio);
 
     return {
       clusterCount: selectedRowCount,
@@ -756,7 +764,13 @@
       liquidityPerPercentMove,
       regionPullScore,
       regionMagnetStrength,
+      distance: {
+        priceDistance: Math.abs(distanceEdgePrice - currentPrice),
+        percent: distancePercent
+      },
+      continuityPercent,
       fragmentationIndex,
+      structureQuality,
       zoneType,
       cascadeProbability
     };
@@ -783,10 +797,9 @@
       const styleTag = document.createElement("style");
       styleTag.id = "liq-tools-panel-style";
       styleTag.textContent = `
-        #liq-tools-panel {
+        #liq-tools-panel, [id^="liq-region-panel-"] {
           position: fixed;
           top: 10px;
-          left: 10px;
           width: 320px;
           z-index: 999999;
           background: #111;
@@ -799,7 +812,7 @@
           box-sizing: border-box;
           overflow: hidden;
         }
-        #liq-tools-panel .liq-panel-header {
+        #liq-tools-panel .liq-panel-header, [id^="liq-region-panel-"] .liq-panel-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -807,11 +820,11 @@
           padding: 12px 14px;
           border-bottom: 1px solid rgba(255,255,255,0.12);
         }
-        #liq-tools-panel .liq-panel-title {
+        #liq-tools-panel .liq-panel-title, [id^="liq-region-panel-"] .liq-panel-title {
           font-size: 16px;
           font-weight: 700;
         }
-        #liq-tools-panel .liq-panel-toggle {
+        #liq-tools-panel .liq-panel-toggle, [id^="liq-region-panel-"] .liq-panel-toggle {
           background: #1b1b1b;
           color: #fff;
           border: 1px solid #fff;
@@ -820,7 +833,7 @@
           font: inherit;
           cursor: pointer;
         }
-        #liq-tools-panel .liq-panel-content {
+        #liq-tools-panel .liq-panel-content, [id^="liq-region-panel-"] .liq-panel-content {
           padding: 14px;
           max-height: calc(100vh - 90px);
           overflow-y: auto;
@@ -839,32 +852,32 @@
         #liq-tools-panel.is-collapsed .liq-panel-header {
           border-bottom: none;
         }
-        #liq-tools-panel .liq-section-heading {
+        #liq-tools-panel .liq-section-heading, [id^="liq-region-panel-"] .liq-section-heading {
           margin: 0 0 8px;
           font-size: 14px;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.04em;
         }
-        #liq-tools-panel .liq-section-heading:not(:first-child) {
+        #liq-tools-panel .liq-section-heading:not(:first-child), [id^="liq-region-panel-"] .liq-section-heading:not(:first-child) {
           margin-top: 16px;
         }
-        #liq-tools-panel .liq-stat-row {
+        #liq-tools-panel .liq-stat-row, [id^="liq-region-panel-"] .liq-stat-row {
           display: grid;
           grid-template-columns: minmax(0, 1fr) auto;
           align-items: baseline;
           gap: 16px;
           margin: 4px 0;
         }
-        #liq-tools-panel .liq-stat-label {
+        #liq-tools-panel .liq-stat-label, [id^="liq-region-panel-"] .liq-stat-label {
           text-align: left;
           white-space: nowrap;
         }
-        #liq-tools-panel .liq-stat-value {
+        #liq-tools-panel .liq-stat-value, [id^="liq-region-panel-"] .liq-stat-value {
           text-align: right;
           white-space: nowrap;
         }
-        #liq-tools-panel .liq-info-tip {
+        #liq-tools-panel .liq-info-tip, [id^="liq-region-panel-"] .liq-info-tip {
           display: inline-flex;
           align-items: center;
           justify-content: center;
@@ -922,22 +935,27 @@
       document.body.appendChild(box);
     }
 
+    const anchor = index === 0
+      ? document.getElementById("liq-tools-panel")
+      : document.getElementById(`liq-region-panel-${index - 1}`);
+    const anchorRect = anchor?.getBoundingClientRect();
+    const left = anchorRect ? anchorRect.right + 10 : 340 + (index * 330);
+
     Object.assign(box.style, {
       position: "fixed",
-      left: `${255 + (index * 290)}px`,
-      top: "110px",
-      width: "270px",
+      left: `${left}px`,
+      top: "10px",
+      width: "320px",
       zIndex: 999999,
       background: "#111",
       color: "#fff",
-      padding: "14px",
       border: `1px solid ${style.panelBorder}`,
       borderRadius: "10px",
       fontFamily: "monospace",
       fontSize: "13px",
       lineHeight: "1.45",
-      maxHeight: "calc(100vh - 140px)",
-      overflowY: "auto",
+      maxHeight: "calc(100vh - 20px)",
+      overflow: "hidden",
       boxSizing: "border-box"
     });
 
@@ -973,47 +991,35 @@
 
   function renderRegionOverlay(index, selectionData) {
     const box = ensureRegionPanel(index);
-    const { bottomPrice: min, topPrice: max, stats } = selectionData;
-    const distanceLine = stats.distance?.anchor === "inside"
-      ? `Distance: 0 rows [inside]<br>${formatCurrency(0)} (0.00%)`
-      : stats.distance
-        ? `Distance: ${stats.distance.rows} rows<br>${formatCurrency(stats.distance.priceDistance)} - ${formatPercentDistance(stats.distance.edgePrice, stats.currentPrice)}%`
-        : `Distance: n/a`;
-    const largestClusterLine = stats.largestCluster
-      ? `${formatCurrency(stats.largestCluster.liquidity)}<br>${stats.largestClusterDistance?.rows ?? 0} rows away - ${(stats.largestClusterDistance?.percent ?? 0).toFixed(2)}%`
-      : `n/a`;
+    const { stats } = selectionData;
+    const distancePrice = Number(stats.distance?.priceDistance);
+    const distancePercent = Number(stats.distance?.percent);
+    const continuityPercent = Number.isFinite(Number(stats.continuityPercent))
+      ? Number(stats.continuityPercent)
+      : Number(stats.continuityScore) * 100;
+    const fragmentationIndex = Number(stats.fragmentationIndex);
+    const distanceDisplay = Number.isFinite(distancePrice) && Number.isFinite(distancePercent)
+      ? `${formatCurrency(distancePrice)} (${distancePercent.toFixed(2)}%)`
+      : "n/a";
 
     box.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <b>Selected Region ${index + 1}</b>
-        <button id="liq-region-close-${index}" style="background:#1b1b1b;color:#fff;border:1px solid #fff;border-radius:6px;padding:0px 8px 2px;font:inherit;cursor:pointer;">x</button>
-      </div><br>
-      <b>Region Direction Signal</b><br>
-      <b>Region Pull Score:</b> ${formatCompactMetric(stats.regionPullScore)}<br>
-      <b>Region Magnet Strength:</b> ${formatCompactMetric(stats.regionMagnetStrength)}<br>
-      <b>Region Bias:</b> ${stats.regionBias}<br><br>
-      <b>Region Boundaries</b><br>
-      <b>Top:</b> ${formatPriceWithDistance(max, stats.currentPrice)}<br>
-      <b>Bottom:</b> ${formatPriceWithDistance(min, stats.currentPrice)}<br><br>
-      <b>Distance From Price</b><br>
-      ${distanceLine}<br><br>
-      <b>Region Liquidity Structure</b><br>
-      <b>Liquidity:</b> ${formatCurrency(stats.totalLiquidity)}<br>
-      <b>Clusters:</b> ${stats.activeClusterCount}<br>
-      <b>Rows:</b> ${stats.clusterCount}<br><br>
-      <b>Cluster Distribution Metrics</b><br>
-      <b>Avg Cluster Size:</b> ${formatCurrency(stats.avgClusterSize)}<br>
-      <b>Largest Cluster:</b> ${largestClusterLine}<br><br>
-      <b>Density Score:</b> ${formatCurrency(stats.densityScore)}<br>
-      <b>Continuity Score:</b> ${(stats.continuityScore * 100).toFixed(2)}%<br>
-      <b>Peak Concentration Ratio:</b> ${formatRatio(stats.peakConcentrationRatio)}<br><br>
-      <b>Distribution Classification</b><br>
-      <b>Zone Type:</b> ${stats.zoneType}<br>
-      <b>Cascade Probability:</b> ${stats.cascadeProbability}<br>
-      <b>Fragmentation Index:</b> ${stats.fragmentationIndex.toFixed(2)}%<br><br>
-      <b>Diagnostics</b><br>
-      <b>Row Span Width:</b> ${formatCurrency(stats.rowSpanWidth)}<br>
-      <b>Liquidity Per % Move:</b> ${formatCurrency(stats.liquidityPerPercentMove)}
+      <div class="liq-panel-header">
+        <div class="liq-panel-title">Selected Region ${index + 1}</div>
+        <button id="liq-region-close-${index}" type="button" class="liq-panel-toggle">x</button>
+      </div>
+      <div class="liq-panel-content">
+        ${renderStatRow("Distance", escapeHtml(distanceDisplay))}
+        ${renderSectionHeading("Liquidity Mass")}
+        ${renderStatRow("Total Liquidity", escapeHtml(formatCurrency(stats.totalLiquidity)))}
+        ${renderStatRow("Cluster Count", escapeHtml(String(stats.activeClusterCount)))}
+        ${renderSectionHeading("Structure Quality")}
+        ${renderStatRow("Continuity Score", escapeHtml(Number.isFinite(continuityPercent) ? `${continuityPercent.toFixed(2)}%` : "n/a"))}
+        ${renderStatRow("Fragmentation Index", escapeHtml(Number.isFinite(fragmentationIndex) ? `${fragmentationIndex.toFixed(2)}%` : "n/a"))}
+        ${renderStatRow("Peak Concentration Ratio", escapeHtml(formatRatio(stats.peakConcentrationRatio)))}
+        ${renderStatRow("Structure Quality", escapeHtml(stats.structureQuality), "STRONG | MODERATE | WEAK")}
+        ${renderStatRow("Zone Type", escapeHtml(stats.zoneType), "CONTINUOUS STACK | LAYERED STACK | FRAGMENTED | SINGLE MAGNET")}
+        ${renderStatRow("Cascade Probability", escapeHtml(stats.cascadeProbability), "LOW | MODERATE | HIGH")}
+      </div>
     `;
 
     const closeButton = document.getElementById(`liq-region-close-${index}`);
@@ -1026,17 +1032,10 @@
     clearSelectionHighlights();
     clearRegionPanels();
 
-    const pullScores = savedSelections.map(selectionData => selectionData.stats.regionPullScore);
-    savedSelections = savedSelections.map((selectionData, index) => ({
-      ...selectionData,
-      stats: {
-        ...selectionData.stats,
-        regionBias: classifyRegionBias(
-          selectionData.stats.regionPullScore,
-          pullScores[index === 0 ? 1 : 0]
-        )
-      }
-    }));
+    savedSelections = savedSelections.map(selectionData => {
+      const refreshedStats = computeRegionStats(selectionData.range.minIndex, selectionData.range.maxIndex);
+      return refreshedStats ? { ...selectionData, stats: refreshedStats } : selectionData;
+    });
 
     const geometry = buildRowGeometry();
     savedSelections.forEach((selectionData, index) => {
