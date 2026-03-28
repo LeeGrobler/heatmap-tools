@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting... category-axis resolver enabled (40)");
+  console.log("Heatmap watcher booting... category-axis resolver enabled (41)");
 
   const SELECTION_STYLES = [
     {
@@ -28,6 +28,7 @@
   ];
 
   let savedSelections = [];
+  let overlayCollapsed = false;
 
   /* -------------------------------------------------
     FOUNDATION 1 — DATA EXTRACTION (unchanged)
@@ -261,10 +262,66 @@
     return value.toFixed(2);
   }
 
+  function formatSignedMetric(value) {
+    if (!Number.isFinite(value)) return "n/a";
+    return value.toFixed(2);
+  }
+
   function safeDivide(numerator, denominator) {
     if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) return NaN;
     if (denominator === 0) return numerator > 0 ? Infinity : 0;
     return numerator / denominator;
+  }
+
+  function normalizeDirectionalScore(aboveValue, belowValue) {
+    const above = Number(aboveValue);
+    const below = Number(belowValue);
+
+    if (above === Infinity && below === Infinity) return 0;
+    if (above === Infinity) return 1;
+    if (below === Infinity) return -1;
+    if (!Number.isFinite(above) || !Number.isFinite(below)) return NaN;
+
+    const total = above + below;
+    if (total === 0) return 0;
+
+    const normalized = (above - below) / total;
+    return Math.max(-1, Math.min(1, normalized));
+  }
+
+  function classifyDirectionalShort(score) {
+    if (!Number.isFinite(score)) return "n/a";
+    if (score > 0) return "UP";
+    if (score < 0) return "DOWN";
+    return "FLAT";
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function renderStatLabel(label, tooltipText) {
+    if (!tooltipText) return `<span>${escapeHtml(label)}</span>`;
+
+    return `<span>${escapeHtml(label)} <span class="liq-info-tip" title="${escapeHtml(tooltipText)}">i</span></span>`;
+  }
+
+  function renderStatRow(label, value, tooltipText) {
+    return `
+      <div class="liq-stat-row">
+        <div class="liq-stat-label">${renderStatLabel(label, tooltipText)}</div>
+        <div class="liq-stat-value">${value}</div>
+      </div>
+    `;
+  }
+
+  function renderSectionHeading(title) {
+    return `<div class="liq-section-heading">${escapeHtml(title)}</div>`;
   }
 
   function classifySandwichStrength(ratio) {
@@ -551,6 +608,8 @@
     const nearestBelowDistancePercent = nearestBelow ? Number(formatPercentDistance(nearestBelow.price, price)) : NaN;
     const weightedPullAbove = safeDivide(totalAbove, nearestAboveDistancePercent) / 1000000;
     const weightedPullBelow = safeDivide(totalBelow, nearestBelowDistancePercent) / 1000000;
+    const dominanceScore = normalizeDirectionalScore(totalAbove, totalBelow);
+    const pullScore = normalizeDirectionalScore(weightedPullAbove, weightedPullBelow);
     const sandwichThreshold = 5000000;
     const sandwich = (Number(nearestAbove?.liquidity) || 0) > sandwichThreshold && (Number(nearestBelow?.liquidity) || 0) > sandwichThreshold;
     const sandwichStrengthRatio = safeDivide(
@@ -566,15 +625,16 @@
       totalAbove,
       totalBelow,
       biasRowsChecked,
-      dominanceRatio: totalBelow === 0 ? (totalAbove > 0 ? Infinity : 0) : totalAbove / totalBelow,
+      dominanceScore,
+      dominanceLabel: classifyDirectionalShort(dominanceScore),
       nearestAboveDistancePercent,
       nearestBelowDistancePercent,
-      weightedPullAbove,
-      weightedPullBelow,
-      pullBias: weightedPullAbove >= weightedPullBelow ? "ABOVE" : "BELOW",
-      sandwich: sandwich ? "YES" : "NO",
+      pullScore,
+      pullLabel: classifyDirectionalShort(pullScore),
+      sandwich,
       sandwichStrength: sandwich ? classifySandwichStrength(sandwichStrengthRatio) : "NONE",
-      imbalanceScore: totalBelow === 0 ? (totalAbove > 0 ? Infinity : 0) : totalAbove / totalBelow
+      weightedPullAbove,
+      weightedPullBelow
     };
   }
 
@@ -720,28 +780,133 @@
     let panel = document.getElementById("liq-tools-panel");
 
     if (!panel) {
+      const styleTag = document.createElement("style");
+      styleTag.id = "liq-tools-panel-style";
+      styleTag.textContent = `
+        #liq-tools-panel {
+          position: fixed;
+          top: 10px;
+          left: 10px;
+          width: 320px;
+          z-index: 999999;
+          background: #111;
+          color: #fff;
+          border: 1px solid #fff;
+          border-radius: 10px;
+          font-family: monospace;
+          font-size: 13px;
+          line-height: 1.45;
+          box-sizing: border-box;
+          overflow: hidden;
+        }
+        #liq-tools-panel .liq-panel-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 12px 14px;
+          border-bottom: 1px solid rgba(255,255,255,0.12);
+        }
+        #liq-tools-panel .liq-panel-title {
+          font-size: 16px;
+          font-weight: 700;
+        }
+        #liq-tools-panel .liq-panel-toggle {
+          background: #1b1b1b;
+          color: #fff;
+          border: 1px solid #fff;
+          border-radius: 6px;
+          padding: 0 8px 2px;
+          font: inherit;
+          cursor: pointer;
+        }
+        #liq-tools-panel .liq-panel-content {
+          padding: 14px;
+          max-height: calc(100vh - 90px);
+          overflow-y: auto;
+          opacity: 1;
+          transform: translateY(0);
+          transition: max-height 180ms ease, opacity 180ms ease, transform 180ms ease, padding 180ms ease;
+        }
+        #liq-tools-panel.is-collapsed .liq-panel-content {
+          max-height: 0;
+          opacity: 0;
+          transform: translateY(-10px);
+          padding-top: 0;
+          padding-bottom: 0;
+          overflow: hidden;
+        }
+        #liq-tools-panel.is-collapsed .liq-panel-header {
+          border-bottom: none;
+        }
+        #liq-tools-panel .liq-section-heading {
+          margin: 0 0 8px;
+          font-size: 14px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+        #liq-tools-panel .liq-section-heading:not(:first-child) {
+          margin-top: 16px;
+        }
+        #liq-tools-panel .liq-stat-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: baseline;
+          gap: 16px;
+          margin: 4px 0;
+        }
+        #liq-tools-panel .liq-stat-label {
+          text-align: left;
+          white-space: nowrap;
+        }
+        #liq-tools-panel .liq-stat-value {
+          text-align: right;
+          white-space: nowrap;
+        }
+        #liq-tools-panel .liq-info-tip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 14px;
+          margin-left: 4px;
+          border: 1px solid rgba(255,255,255,0.6);
+          border-radius: 999px;
+          font-size: 10px;
+          line-height: 1;
+          cursor: help;
+          color: rgba(255,255,255,0.9);
+        }
+      `;
+      document.head.appendChild(styleTag);
+
       panel = document.createElement("div");
       panel.id = "liq-tools-panel";
+      panel.innerHTML = `
+        <div class="liq-panel-header">
+          <div class="liq-panel-title">Heatmap Overview</div>
+          <button type="button" class="liq-panel-toggle" aria-expanded="true">-</button>
+        </div>
+        <div class="liq-panel-content"></div>
+      `;
 
-      Object.assign(panel.style, {
-        position: "fixed",
-        top: "110px",
-        left: "10px",
-        zIndex: 999999,
-        background: "#111",
-        color: "#fff",
-        padding: "14px",
-        border: "1px solid #fff",
-        borderRadius: "10px",
-        fontFamily: "monospace",
-        fontSize: "13px",
-        lineHeight: "1.45",
-        maxHeight: "calc(100vh - 140px)",
-        overflowY: "auto",
-        boxSizing: "border-box"
+      const toggle = panel.querySelector(".liq-panel-toggle");
+      toggle.addEventListener("click", () => {
+        overlayCollapsed = !overlayCollapsed;
+        panel.classList.toggle("is-collapsed", overlayCollapsed);
+        toggle.textContent = overlayCollapsed ? "+" : "-";
+        toggle.setAttribute("aria-expanded", overlayCollapsed ? "false" : "true");
       });
 
       document.body.appendChild(panel);
+    }
+
+    panel.classList.toggle("is-collapsed", overlayCollapsed);
+    const toggle = panel.querySelector(".liq-panel-toggle");
+    if (toggle) {
+      toggle.textContent = overlayCollapsed ? "+" : "-";
+      toggle.setAttribute("aria-expanded", overlayCollapsed ? "false" : "true");
     }
 
     return panel;
@@ -781,36 +946,26 @@
 
   function renderOverlay(stats) {
     const panel = ensureOverlayPanel();
-    const bias = stats.totalAbove > stats.totalBelow ? "UPWARD" : "DOWNWARD";
+    const content = panel.querySelector(".liq-panel-content");
+    const dominanceDisplay = `${formatSignedMetric(stats.dominanceScore)} (${stats.dominanceLabel})`;
+    const pullDisplay = `${formatSignedMetric(stats.pullScore)} (${stats.pullLabel})`;
+    const sandwichRow = stats.sandwich
+      ? renderStatRow("Sandwich", escapeHtml(stats.sandwichStrength), "WEAK | MODERATE | STRONG")
+      : "";
     drawCurrentPriceHighlight(stats.currentPrice);
 
-    panel.innerHTML = `
-      <b>Heatmap Overview</b><br><br>
-      <b>Price:</b> ${formatPriceWithDistance(stats.currentPrice, stats.currentPrice)}<br><br>
-      <b>Directional Bias</b><br>
-      <b>Bias:</b> ${bias}<br>
-      <b>Dominance Ratio:</b> ${formatRatio(stats.dominanceRatio)}<br>
-      <b>Weighted Pull Above:</b> ${formatCompactMetric(stats.weightedPullAbove)}<br>
-      <b>Weighted Pull Below:</b> ${formatCompactMetric(stats.weightedPullBelow)}<br>
-      <b>Pull Bias:</b> ${stats.pullBias}<br><br>
-      <b>Nearest Liquidity Magnets</b><br>
-      <b>Nearest Above:</b><br>
-      ${formatPriceWithDistance(stats.nearestAbove?.price, stats.currentPrice)}<br>
-      ${formatCurrency(stats.nearestAbove?.liquidity)}<br><br>
-      <b>Nearest Below:</b><br>
-      ${formatPriceWithDistance(stats.nearestBelow?.price, stats.currentPrice)}<br>
-      ${formatCurrency(stats.nearestBelow?.liquidity)}<br><br>
-      <b>Range Liquidity Totals</b><br>
-      <b>Total Above:</b><br>
-      ${formatCurrency(stats.totalAbove)}<br><br>
-      <b>Total Below:</b><br>
-      ${formatCurrency(stats.totalBelow)}<br><br>
-      <b>Sandwich Detection</b><br>
-      <b>Sandwich:</b> ${stats.sandwich}<br>
-      <b>Sandwich Strength:</b> ${stats.sandwichStrength}<br><br>
-      <b>Scan Context</b><br>
-      <b>Rows Compared:</b> ${stats.biasRowsChecked}<br>
-      <b>Imbalance Score:</b> ${formatRatio(stats.imbalanceScore)}
+    content.innerHTML = `
+      ${renderStatRow("Price", escapeHtml(formatPriceWithDistance(stats.currentPrice, stats.currentPrice)))}
+      ${renderSectionHeading("Directional Bias")}
+      ${sandwichRow}
+      ${renderStatRow("Pull Score", escapeHtml(pullDisplay), "UP | DOWN | FLAT")}
+      ${renderStatRow("Dominance", escapeHtml(dominanceDisplay), "UP | DOWN | FLAT")}
+      ${renderSectionHeading("Nearest Magnets")}
+      ${renderStatRow("Above", escapeHtml(formatPriceWithDistance(stats.nearestAbove?.price, stats.currentPrice)))}
+      ${renderStatRow("Below", escapeHtml(formatPriceWithDistance(stats.nearestBelow?.price, stats.currentPrice)))}
+      ${renderSectionHeading("Range Liquidity")}
+      ${renderStatRow("Total Above", escapeHtml(formatCurrency(stats.totalAbove)))}
+      ${renderStatRow("Total Below", escapeHtml(formatCurrency(stats.totalBelow)))}
     `;
   }
 
