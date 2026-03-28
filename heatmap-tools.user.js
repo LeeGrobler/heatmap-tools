@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coinglass Heatmap Tools (Dev Build)
 // @namespace    coinglass-heatmap-tools
-// @version      0.44
+// @version      0.45
 // @description  Adds analytical tooling to Coinglass liquidation heatmap
 // @match        https://www.coinglass.com/*
 // @match        https://coinglass.com/*
@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting - 0.44");
+  console.log("Heatmap watcher booting - 0.45");
 
   const SELECTION_STYLES = [
     {
@@ -799,7 +799,6 @@
       styleTag.textContent = `
         #liq-tools-panel, [id^="liq-region-panel-"] {
           position: fixed;
-          top: 10px;
           width: 320px;
           z-index: 999999;
           background: #111;
@@ -811,6 +810,13 @@
           line-height: 1.45;
           box-sizing: border-box;
           overflow: hidden;
+        }
+        #liq-tools-panel {
+          left: 10px;
+          bottom: 10px;
+        }
+        [id^="liq-region-panel-"] {
+          top: 10px;
         }
         #liq-tools-panel .liq-panel-header, [id^="liq-region-panel-"] .liq-panel-header {
           display: flex;
@@ -844,7 +850,7 @@
         #liq-tools-panel.is-collapsed .liq-panel-content {
           max-height: 0;
           opacity: 0;
-          transform: translateY(-10px);
+          transform: translateY(10px);
           padding-top: 0;
           padding-bottom: 0;
           overflow: hidden;
@@ -935,11 +941,7 @@
       document.body.appendChild(box);
     }
 
-    const anchor = index === 0
-      ? document.getElementById("liq-tools-panel")
-      : document.getElementById(`liq-region-panel-${index - 1}`);
-    const anchorRect = anchor?.getBoundingClientRect();
-    const left = anchorRect ? anchorRect.right + 10 : 340 + (index * 330);
+    const left = 10 + (index * 330);
 
     Object.assign(box.style, {
       position: "fixed",
@@ -1017,6 +1019,7 @@
         ${renderStatRow("Fragmentation Index", escapeHtml(Number.isFinite(fragmentationIndex) ? `${fragmentationIndex.toFixed(2)}%` : "n/a"))}
         ${renderStatRow("Peak Concentration Ratio", escapeHtml(formatRatio(stats.peakConcentrationRatio)))}
         ${renderStatRow("Structure Quality", escapeHtml(stats.structureQuality), "STRONG | MODERATE | WEAK")}
+        <br>
         ${renderStatRow("Zone Type", escapeHtml(stats.zoneType), "CONTINUOUS STACK | LAYERED STACK | FRAGMENTED | SINGLE MAGNET")}
         ${renderStatRow("Cascade Probability", escapeHtml(stats.cascadeProbability), "LOW | MODERATE | HIGH")}
       </div>
