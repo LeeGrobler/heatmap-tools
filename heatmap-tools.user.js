@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coinglass Heatmap Tools (Dev Build)
 // @namespace    coinglass-heatmap-tools
-// @version      0.48
+// @version      0.49
 // @description  Adds analytical tooling to Coinglass liquidation heatmap
 // @match        https://www.coinglass.com/*
 // @match        https://coinglass.com/*
@@ -10,7 +10,7 @@
 // ==/UserScript==
 
 (function installHeatmapWatcher() {
-  console.log("Heatmap watcher booting - 0.48");
+  console.log("Heatmap watcher booting - 0.49");
 
   const SELECTION_STYLES = [
     {
@@ -29,6 +29,7 @@
 
   let savedSelections = [];
   let overlayCollapsed = false;
+  const PANEL_WIDTH = 400;
 
   /* -------------------------------------------------
     FOUNDATION 1 — DATA EXTRACTION (unchanged)
@@ -841,7 +842,7 @@
       styleTag.textContent = `
         #liq-tools-panel, [id^="liq-region-panel-"] {
           position: fixed;
-          width: 320px;
+          width: ${PANEL_WIDTH}px;
           z-index: 999999;
           background: #111;
           color: #fff;
@@ -983,13 +984,13 @@
       document.body.appendChild(box);
     }
 
-    const left = 10 + (index * 330);
+    const left = 10 + (index * (PANEL_WIDTH + 10));
 
     Object.assign(box.style, {
       position: "fixed",
       left: `${left}px`,
       top: "10px",
-      width: "320px",
+      width: `${PANEL_WIDTH}px`,
       zIndex: 999999,
       background: "#111",
       color: "#fff",
